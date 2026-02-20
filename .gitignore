@@ -1,0 +1,7 @@
+.vscode
+lib
+out
+*.nes
+
+*.tmp
+nestest.log.txt
