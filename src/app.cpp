@@ -1,5 +1,6 @@
 #include <app.h>
 #include <memory>
+#include <unordered_map>
 #include <chrono>
 #include <thread>
 #include <types.h>
@@ -9,6 +10,7 @@
 #include <ppu.h>
 #include <timing.h>
 #include <window.h>
+#include <controller.h>
 
 // #define NO_UI
 
@@ -39,6 +41,46 @@ private:
 
 void ppu_test();
 
+void key_event(SDL_Event *event) {
+    auto &ctrl = Bus::get().get_controller();
+    int type = event->type == SDL_EVENT_KEY_DOWN ? 1 : 0;
+    auto fn = [type, &ctrl](KeyMask mask){
+        if (type == 1) {
+            ctrl->key_down(Controller::Controller1, mask);
+        } else {
+            ctrl->key_up(Controller::Controller1, mask);
+        }
+    };
+    switch (event->key.key) {
+    case SDLK_A:
+        fn(KeyMask::Left);
+        break;
+    case SDLK_W:
+        fn(KeyMask::Up);
+        break;
+    case SDLK_S:
+        fn(KeyMask::Down);
+        break;
+    case SDLK_D:
+        fn(KeyMask::Right);
+        break;
+    case SDLK_F:
+        fn(KeyMask::Select);
+        break;
+    case SDLK_H:
+        fn(KeyMask::Start);
+        break;
+    case SDLK_J:
+        fn(KeyMask::B);
+        break;
+    case SDLK_K:
+        fn(KeyMask::A);
+        break;   
+    default:
+        break;
+    }
+}
+
 
 void Application::start(int argc, char *argv[]) {
     if (argc < 2) {
@@ -61,7 +103,9 @@ void Application::start(int argc, char *argv[]) {
     while (window.is_running()) {
         SDL_Event event;
         while (window.poll_event(&event)) {
-            (void)event;
+            if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) {
+                key_event(&event);
+            }
         }
 
         auto last_tick = Timing::get_current_tick() + PPU::total_frame_ticks;

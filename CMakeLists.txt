@@ -17,6 +17,7 @@ src/cpu.cpp
 src/mapper.cpp
 src/timing.cpp
 src/window.cpp
+src/controller.cpp
 )
 
 set(headers 

@@ -4,9 +4,11 @@
 #include <cartridge.h>
 #include <ppu.h>
 #include <cpu.h>
+#include <controller.h>
 
 Bus::Bus() {
     ppu = std::make_shared<PPU>();
+    controller_device = std::make_shared<Controller>();
 }
 
 CPU &Bus::get_CPU() {
@@ -20,9 +22,17 @@ void Bus::cpu_write(uint16_t addr, uint8_t value) {
         cpu_ram[addr & 0x7FF] = value;
         return;
     }
-    if (0x2000 <= addr && addr < 0x4020) {
+    if (0x2000 <= addr && addr < 0x4000) {
         //PPU registers
         ppu->cpu_write(addr, value);
+    }
+    if (addr == 0x4014) {
+        ppu->cpu_write(addr, value);
+    }
+
+    //Controller
+    if (addr == 0x4016 || addr == 0x4017) {
+        controller_device->cpu_write(addr, value);
     }
 }
 
@@ -32,9 +42,18 @@ uint8_t Bus::cpu_read(uint16_t addr) {
         return cpu_ram[addr & 0x7FF];
     }
 
-    if (0x2000 <= addr && addr < 0x4020) {
+    if (0x2000 <= addr && addr < 0x4000) {
         //PPU registers
         return ppu->cpu_read(addr);
+    }
+
+    if (addr == 0x4014) {
+        return ppu->cpu_read(addr);
+    }
+
+    //Controller
+    if (addr == 0x4016 || addr == 0x4017) {
+        return controller_device->cpu_read(addr);
     }
     
     //ROM
