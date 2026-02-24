@@ -4,6 +4,7 @@
 #include <bus.h>
 #include <types.h>
 #include <log.h>
+#include <timing.h>
 
 #ifdef DEBUG_V1
 //Debug
@@ -29,9 +30,9 @@
 #define IS_NEG(u8_val) (u8_val & 0x80)
 
 #define PUSH(value)  \
-cpu.bus->cpu_write((uint16_t)cpu.s | 0x100, value); \
+Bus::get().cpu_write((uint16_t)cpu.s | 0x100, value); \
 --cpu.s
-#define POP() cpu.bus->cpu_read((uint16_t)(++cpu.s) | 0x100)
+#define POP() Bus::get().cpu_read((uint16_t)(++cpu.s) | 0x100)
 
 using std::shared_ptr;
 
@@ -55,119 +56,61 @@ CPU& get_cpu() {
 }
 
 void CPU::reset() {
-    uint8_t reset_low = bus->cpu_read(0xFFFC);
-    uint8_t reset_high = bus->cpu_read(0xFFFD);
+    uint8_t reset_low = Bus::get().cpu_read(0xFFFC);
+    uint8_t reset_high = Bus::get().cpu_read(0xFFFD);
     uint16_t reset_vector = ((uint16_t)reset_high << 8) | reset_low;
     pc = reset_vector;
     p = I | 0x20;
     s = 0xFD;
-    next_clock_cycle = 7;
-    cycle_counter = 0;
     opcode = 0;
     is_branch = false;
     op_length = 0;
     is_NMI = false;
     is_IRQ = false;
+
+    //重置周期
+    Timing::reset_tick();
+    Timing::step_cpu_tick(7);
 }
 
-void opcode_log() {
-    auto tmp = cpu.op_length;
-    auto cycle = cpu.next_clock_cycle;
-    (void)instructions[cpu.opcode].addr_mode();
-    switch (cpu.op_length) {
-    case 1:
-    LOG("%04X %02X       -- A:%02X X:%02X Y:%02X P:%02X SP:%02X   CYC:%d\n", cpu.pc, 
-        cpu.bus->cpu_read(cpu.pc),
-        cpu.a, cpu.x, cpu.y, cpu.p, cpu.s, cpu.cycle_counter
-    );
-    break;
-    case 2:
-    LOG("%04X %02X %02X    -- A:%02X X:%02X Y:%02X P:%02X SP:%02X   CYC:%d\n", cpu.pc, 
-        cpu.bus->cpu_read(cpu.pc),
-        cpu.bus->cpu_read(cpu.pc + 1),
-        cpu.a, cpu.x, cpu.y, cpu.p, cpu.s, cpu.cycle_counter
-    );
-    break;
-    case 3:
-    LOG("%04X %02X %02X %02X -- A:%02X X:%02X Y:%02X P:%02X SP:%02X   CYC:%d\n", cpu.pc, 
-        cpu.bus->cpu_read(cpu.pc),
-        cpu.bus->cpu_read(cpu.pc + 1),
-        cpu.bus->cpu_read(cpu.pc + 2),
-        cpu.a, cpu.x, cpu.y, cpu.p, cpu.s, cpu.cycle_counter
-    );
-    break;
-    default:
-    LOG("%04X %02X %02X %02X -- A:%02X X:%02X Y:%02X P:%02X SP:%02X   CYC:%d\n", cpu.pc, 
-        cpu.bus->cpu_read(cpu.pc),
-        cpu.bus->cpu_read(cpu.pc + 1),
-        cpu.bus->cpu_read(cpu.pc + 2),
-        cpu.a, cpu.x, cpu.y, cpu.p, cpu.s, cpu.cycle_counter
-    );
+void CPU::run1operation() {
+    if (pc == 0xFFFC) { //复位中断
+        cpu.reset();
+        return;
     }
-    cpu.op_length = tmp;
-    cpu.next_clock_cycle = cycle;
-}
-
-
-void CPU::run1cycle() {
-    #ifdef DEBUG_V1
-    static auto logger = std::make_unique<CPULogChecker>();
-    if (!logger->is_loadded()) {
-        if (!logger->loadLogFile("nestest.log.txt")) {
-            throw std::runtime_error("No file");
-        }
+    if (is_NMI) {
+        //如果有NMI中断来
+        uint16_t low = Bus::get().cpu_read(0xFFFA);
+        uint16_t high = (uint16_t)Bus::get().cpu_read(0xFFFB) << 8;
+        PUSH((uint8_t)(pc >> 8));
+        PUSH((uint8_t)(pc & 0xFF));
+        PUSH(p);
+        pc = low | high;
+        is_NMI = false;
+        Timing::step_cpu_tick(7);
+        return;
+    } 
+    if (is_IRQ) {  //这里应该有个IRQ屏蔽位?
+        //如果有NMI中断来
+        uint16_t low = Bus::get().cpu_read(0xFFFA);
+        uint16_t high = (u_int16_t)Bus::get().cpu_read(0xFFFB) << 8;
+        PUSH(pc);
+        PUSH(p);
+        pc = low | high;
+        is_IRQ = false;
+        Timing::step_cpu_tick(7);
+        return;
     }
-    #endif
-
-    if (cycle_counter >= next_clock_cycle ) {
-        if (pc == 0xFFFC) { //复位中断
-            cpu.reset();
-            goto cycle_end;
-        }
-        if (is_NMI) {
-            //如果有NMI中断来
-            uint16_t low = bus->cpu_read(0xFFFA);
-            uint16_t high = (u_int16_t)bus->cpu_read(0xFFFB) << 8;
-            PUSH(pc);
-            PUSH(p);
-            pc = low | high;
-            is_NMI = false;
-            next_clock_cycle += 7;
-            goto cycle_end;
-        } 
-        if (is_IRQ) {  //这里应该有个IRQ屏蔽位?
-            //如果有NMI中断来
-            uint16_t low = bus->cpu_read(0xFFFA);
-            uint16_t high = (u_int16_t)bus->cpu_read(0xFFFB) << 8;
-            PUSH(pc);
-            PUSH(p);
-            pc = low | high;
-            is_IRQ = false;
-            next_clock_cycle += 7;
-            goto cycle_end;
-        }
-        opcode = bus->cpu_read(pc);
-
-        #ifdef DEBUG_V1
-        opcode_log();
-        bool correct = logger->check(cpu.pc, cpu.cycle_counter);
-        #endif
-        
-        instructions[opcode].func();
-        //进行周期计算
-        next_clock_cycle += instructions[opcode].cycle;
-        //判断是否有分支
-        if (!is_branch) {
-            pc += op_length;
-        }
-        is_branch = false;
+    opcode = Bus::get().cpu_read(pc);
+    
+    instructions[opcode].func();
+    //进行周期计算
+    Timing::step_cpu_tick(instructions[opcode].cycle);
+    //判断是否有分支
+    if (!is_branch) {
+        pc += op_length;
     }
-cycle_end:
-    cycle_counter++;
-}
-
-void CPU::set_bus(std::shared_ptr<Bus> bus) {
-    this->bus = std::move(bus);
+    is_branch = false;
 }
 
 void CPU::trigger_NMI() {
@@ -184,52 +127,52 @@ void CPU::trigger_NMI() {
 uint16_t acc();
 
 void LDA() {
-    uint8_t value = cpu.bus->cpu_read(instructions[cpu.opcode].addr_mode());
+    uint8_t value = Bus::get().cpu_read(instructions[cpu.opcode].addr_mode());
     SET_FLAG(N, IS_NEG(value));
     SET_FLAG(Z, value == 0);
     cpu.a = value;
 }
 
 void LDX() {
-    uint8_t value = cpu.bus->cpu_read(instructions[cpu.opcode].addr_mode());
+    uint8_t value = Bus::get().cpu_read(instructions[cpu.opcode].addr_mode());
     SET_FLAG(N, IS_NEG(value));
     SET_FLAG(Z, value == 0);
     cpu.x = value;
 }
 
 void LDY() {
-    uint8_t value = cpu.bus->cpu_read(instructions[cpu.opcode].addr_mode());
+    uint8_t value = Bus::get().cpu_read(instructions[cpu.opcode].addr_mode());
     SET_FLAG(N, IS_NEG(value));
     SET_FLAG(Z, value == 0);
     cpu.y = value;
 }
 
 void STA() {
-    auto cycle = cpu.next_clock_cycle;
+    auto cycle = Timing::get_current_tick();
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    cpu.next_clock_cycle = cycle;
-    cpu.bus->cpu_write(addr, cpu.a);
+    Timing::set_tick(cycle);
+    Bus::get().cpu_write(addr, cpu.a);
 }
 
 void STX() {
-    auto cycle = cpu.next_clock_cycle;
+    auto cycle = Timing::get_current_tick();
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    cpu.next_clock_cycle = cycle;
-    cpu.bus->cpu_write(addr, cpu.x);
+    Timing::set_tick(cycle);
+    Bus::get().cpu_write(addr, cpu.x);
 }
 
 void STY() {
-    auto cycle = cpu.next_clock_cycle;
+    auto cycle = Timing::get_current_tick();
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    cpu.next_clock_cycle = cycle;
-    cpu.bus->cpu_write(addr, cpu.y);
+    Timing::set_tick(cycle);
+    Bus::get().cpu_write(addr, cpu.y);
 }
 
 void STZ() {
-    auto cycle = cpu.next_clock_cycle;
+    auto cycle = Timing::get_current_tick();
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    cpu.next_clock_cycle = cycle;
-    cpu.bus->cpu_write(addr, 0);
+    Timing::set_tick(cycle);
+    Bus::get().cpu_write(addr, 0);
 }
 
 void PHA() {
@@ -342,18 +285,18 @@ void DEY() {
 
 void INC() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    uint8_t value = cpu.bus->cpu_read(addr) + 1;
+    uint8_t value = Bus::get().cpu_read(addr) + 1;
     SET_FLAG(N, IS_NEG(value));
     SET_FLAG(Z, value == 0);
-    cpu.bus->cpu_write(addr, value); 
+    Bus::get().cpu_write(addr, value); 
 }
 
 void DEC() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    uint8_t value = cpu.bus->cpu_read(addr) - 1;
+    uint8_t value = Bus::get().cpu_read(addr) - 1;
     SET_FLAG(N, IS_NEG(value));
     SET_FLAG(Z, value == 0);
-    cpu.bus->cpu_write(addr, value); 
+    Bus::get().cpu_write(addr, value); 
 }
 
 void ASL() {
@@ -361,13 +304,13 @@ void ASL() {
     uint8_t value;
     bool is_acc = instructions[cpu.opcode].addr_mode == acc;
     if (is_acc) value = cpu.a;
-    else value = cpu.bus->cpu_read(addr);
+    else value = Bus::get().cpu_read(addr);
     SET_FLAG(C, value >> 7);
     value <<= 1;
     SET_FLAG(N, IS_NEG(value));
     SET_FLAG(Z, value == 0);
     if (is_acc) cpu.a = value;
-    else cpu.bus->cpu_write(addr, value);
+    else Bus::get().cpu_write(addr, value);
 }
 
 void LSR() {
@@ -375,13 +318,13 @@ void LSR() {
     uint8_t value;
     bool is_acc = instructions[cpu.opcode].addr_mode == acc;
     if (is_acc) value = cpu.a;
-    else value = cpu.bus->cpu_read(addr);
+    else value = Bus::get().cpu_read(addr);
     SET_FLAG(C, value & 1);
     value >>= 1;
     SET_FLAG(N, IS_NEG(value));
     SET_FLAG(Z, value == 0);
     if (is_acc) cpu.a = value;
-    else cpu.bus->cpu_write(addr, value);
+    else Bus::get().cpu_write(addr, value);
 }
 
 void ROL() {
@@ -389,7 +332,7 @@ void ROL() {
     uint8_t value;
     bool is_acc = cpu.op_length == 1;
     if (is_acc) value = cpu.a;
-    else value = cpu.bus->cpu_read(addr);
+    else value = Bus::get().cpu_read(addr);
     uint8_t c = GET_FLAG(C);
     SET_FLAG(C, value >> 7);
     value <<= 1;
@@ -397,7 +340,7 @@ void ROL() {
     SET_FLAG(N, IS_NEG(value));
     SET_FLAG(Z, value == 0);
     if (is_acc) cpu.a = value;
-    else cpu.bus->cpu_write(addr, value);
+    else Bus::get().cpu_write(addr, value);
 }
 
 void ROR() {
@@ -405,7 +348,7 @@ void ROR() {
     uint8_t value;
     bool is_acc = cpu.op_length == 1;
     if (is_acc) value = cpu.a;  //累加器寻址
-    else value = cpu.bus->cpu_read(addr);
+    else value = Bus::get().cpu_read(addr);
     uint8_t c = GET_FLAG(C);
     SET_FLAG(C, value & 1);
     value >>= 1;
@@ -413,12 +356,12 @@ void ROR() {
     SET_FLAG(N, IS_NEG(value));
     SET_FLAG(Z, value == 0);
     if (is_acc) cpu.a = value;
-    else cpu.bus->cpu_write(addr, value);
+    else Bus::get().cpu_write(addr, value);
 }
 
 void AND() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    uint8_t value = cpu.bus->cpu_read(addr);
+    uint8_t value = Bus::get().cpu_read(addr);
     cpu.a = cpu.a & value;
     SET_FLAG(N, IS_NEG(cpu.a));
     SET_FLAG(Z, cpu.a == 0);
@@ -426,7 +369,7 @@ void AND() {
 
 void ORA() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    uint8_t value = cpu.bus->cpu_read(addr);
+    uint8_t value = Bus::get().cpu_read(addr);
     cpu.a = cpu.a | value;
     SET_FLAG(N, IS_NEG(cpu.a));
     SET_FLAG(Z, cpu.a == 0);
@@ -434,7 +377,7 @@ void ORA() {
 
 void EOR() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    uint8_t value = cpu.bus->cpu_read(addr);
+    uint8_t value = Bus::get().cpu_read(addr);
     cpu.a = cpu.a ^ value;
     SET_FLAG(N, IS_NEG(cpu.a));
     SET_FLAG(Z, cpu.a == 0);
@@ -442,7 +385,7 @@ void EOR() {
 
 void BIT() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    uint8_t value = cpu.bus->cpu_read(addr);
+    uint8_t value = Bus::get().cpu_read(addr);
     SET_FLAG(Z, (cpu.a & value) == 0);
     SET_FLAG(N, value & (1<<7));
     SET_FLAG(V, value & (1<<6));
@@ -450,7 +393,7 @@ void BIT() {
 
 void CMP() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    uint8_t value = cpu.bus->cpu_read(addr);
+    uint8_t value = Bus::get().cpu_read(addr);
     SET_FLAG(C, cpu.a >= value);
     value = cpu.a - value;
     SET_FLAG(Z, value == 0);
@@ -459,7 +402,7 @@ void CMP() {
 
 void CPX() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    uint8_t value = cpu.bus->cpu_read(addr);
+    uint8_t value = Bus::get().cpu_read(addr);
     SET_FLAG(C, cpu.x >= value);
     value = cpu.x - value;
     SET_FLAG(Z, value == 0);
@@ -468,7 +411,7 @@ void CPX() {
 
 void CPY() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    uint8_t value = cpu.bus->cpu_read(addr);
+    uint8_t value = Bus::get().cpu_read(addr);
     SET_FLAG(C, cpu.y >= value);
     value = cpu.y - value;
     SET_FLAG(Z, value == 0);
@@ -492,7 +435,7 @@ void SMB() {
 
 void ADC() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    uint8_t m = cpu.bus->cpu_read(addr);
+    uint8_t m = Bus::get().cpu_read(addr);
     #ifndef NES_DECIMAL_MODE
     if (!GET_FLAG(D)) {
         //普通计算
@@ -541,7 +484,7 @@ void ADC() {
 
 void SBC() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
-    uint8_t m = cpu.bus->cpu_read(addr);
+    uint8_t m = Bus::get().cpu_read(addr);
     #ifndef NES_DECIMAL_MODE
     if (!GET_FLAG(D)) {
         //普通模式
@@ -630,11 +573,11 @@ void BEQ() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
     if (GET_FLAG(Z)) {
         cpu.is_branch = true;
-        cpu.next_clock_cycle++;
+        Timing::step_cpu_tick(1);
         cpu.pc += 2;
         addr = addr + cpu.pc;
         //判断是否跨页
-        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) cpu.next_clock_cycle++;
+        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) Timing::step_cpu_tick(1);
         cpu.pc = addr; 
     }
 }
@@ -643,11 +586,11 @@ void BNE() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
     if (!GET_FLAG(Z)) {
         cpu.is_branch = true;
-        cpu.next_clock_cycle++;
+        Timing::step_cpu_tick(1);
         cpu.pc += 2;
         addr = addr + cpu.pc;
         //判断是否跨页
-        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) cpu.next_clock_cycle++;
+        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) Timing::step_cpu_tick(1);
         cpu.pc = addr;
     }
 }
@@ -656,11 +599,11 @@ void BCC() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
     if (!GET_FLAG(C)) {
         cpu.is_branch = true;
-        cpu.next_clock_cycle++;
+        Timing::step_cpu_tick(1);
         cpu.pc += 2;
         addr = addr + cpu.pc;
         //判断是否跨页
-        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) cpu.next_clock_cycle++;
+        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) Timing::step_cpu_tick(1);
         cpu.pc = addr;
     }
 }
@@ -669,11 +612,11 @@ void BCS() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
     if (GET_FLAG(C)) {
         cpu.is_branch = true;
-        cpu.next_clock_cycle++;   
+        Timing::step_cpu_tick(1);   
         cpu.pc += 2;
         addr = addr + cpu.pc;
         //判断是否跨页
-        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) cpu.next_clock_cycle++;
+        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) Timing::step_cpu_tick(1);
         cpu.pc = addr;
     }
 }
@@ -682,11 +625,11 @@ void BVC() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
     if (!GET_FLAG(V)) {
         cpu.is_branch = true;
-        cpu.next_clock_cycle++;
+        Timing::step_cpu_tick(1);
         cpu.pc += 2;
         addr = addr + cpu.pc;
         //判断是否跨页
-        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) cpu.next_clock_cycle++;
+        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) Timing::step_cpu_tick(1);
         cpu.pc = addr;
     }
 }
@@ -695,11 +638,11 @@ void BVS() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
     if (GET_FLAG(V)) {
         cpu.is_branch = true;
-        cpu.next_clock_cycle++;
+        Timing::step_cpu_tick(1);
         cpu.pc += 2;
         addr = addr + cpu.pc;
         //判断是否跨页
-        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) cpu.next_clock_cycle++;
+        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) Timing::step_cpu_tick(1);
         cpu.pc = addr;
     }
 }
@@ -708,11 +651,11 @@ void BMI() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
     if (GET_FLAG(N)) {
         cpu.is_branch = true;
-        cpu.next_clock_cycle++;
+        Timing::step_cpu_tick(1);
         cpu.pc += 2;
         addr = addr + cpu.pc;
         //判断是否跨页
-        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) cpu.next_clock_cycle++;
+        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) Timing::step_cpu_tick(1);
         cpu.pc = addr;
     }
 }
@@ -721,11 +664,11 @@ void BPL() {
     uint16_t addr = instructions[cpu.opcode].addr_mode();
     if (!GET_FLAG(N)) {
         cpu.is_branch = true;
-        cpu.next_clock_cycle++;
+        Timing::step_cpu_tick(1);
         cpu.pc += 2;
         addr = addr + cpu.pc;
         //判断是否跨页
-        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) cpu.next_clock_cycle++;
+        if ((addr & 0xFF00) != (cpu.pc & 0xFF00)) Timing::step_cpu_tick(1);
         cpu.pc = addr;
     }
 }
@@ -833,82 +776,82 @@ uint16_t imm() {
 
 uint16_t zp() {
     cpu.op_length = 2;
-    return (uint16_t)cpu.bus->cpu_read(cpu.pc + 1);
+    return (uint16_t)Bus::get().cpu_read(cpu.pc + 1);
 }
 
 uint16_t zpx() {
     cpu.op_length = 2;
-    uint8_t addr = cpu.bus->cpu_read(cpu.pc + 1) + cpu.x;
+    uint8_t addr = Bus::get().cpu_read(cpu.pc + 1) + cpu.x;
     return (uint16_t)addr;
 }
 
 uint16_t zpy() {
     cpu.op_length = 2;
-    uint8_t addr = cpu.bus->cpu_read(cpu.pc + 1) + cpu.y;
+    uint8_t addr = Bus::get().cpu_read(cpu.pc + 1) + cpu.y;
     return (uint16_t)addr;
 }
 
 uint16_t abs() {
     cpu.op_length = 3;
-    return (uint16_t)cpu.bus->cpu_read(cpu.pc + 1) | ((uint16_t)cpu.bus->cpu_read(cpu.pc + 2) << 8);
+    return (uint16_t)Bus::get().cpu_read(cpu.pc + 1) | ((uint16_t)Bus::get().cpu_read(cpu.pc + 2) << 8);
 }
 
 uint16_t abx() {
     cpu.op_length = 3;
-    uint16_t l = (uint16_t)cpu.bus->cpu_read(cpu.pc + 1);
-    uint16_t h = (uint16_t)cpu.bus->cpu_read(cpu.pc + 2) << 8;
+    uint16_t l = (uint16_t)Bus::get().cpu_read(cpu.pc + 1);
+    uint16_t h = (uint16_t)Bus::get().cpu_read(cpu.pc + 2) << 8;
     uint16_t addr = (h | l) + cpu.x;
-    if ((addr & 0xFF00) != h) cpu.next_clock_cycle++;
+    if ((addr & 0xFF00) != h) Timing::step_cpu_tick(1);
     return addr;
 }
 
 uint16_t aby() {
     cpu.op_length = 3;
-    uint16_t l = (uint16_t)cpu.bus->cpu_read(cpu.pc + 1);
-    uint16_t h = (uint16_t)cpu.bus->cpu_read(cpu.pc + 2) << 8;
+    uint16_t l = (uint16_t)Bus::get().cpu_read(cpu.pc + 1);
+    uint16_t h = (uint16_t)Bus::get().cpu_read(cpu.pc + 2) << 8;
     uint16_t addr = (h | l) + cpu.y;
-    if ((addr & 0xFF00) != h) cpu.next_clock_cycle++;
+    if ((addr & 0xFF00) != h) Timing::step_cpu_tick(1);
     return addr;
 }
 
 uint16_t ind() {
     cpu.op_length = 3;
-    uint16_t low = (uint16_t)cpu.bus->cpu_read(cpu.pc + 1);
-    uint16_t high = (uint16_t)cpu.bus->cpu_read(cpu.pc + 2);
+    uint16_t low = (uint16_t)Bus::get().cpu_read(cpu.pc + 1);
+    uint16_t high = (uint16_t)Bus::get().cpu_read(cpu.pc + 2);
     uint16_t addr = (high<<8) | low;
-    low = (uint16_t)cpu.bus->cpu_read(addr);
+    low = (uint16_t)Bus::get().cpu_read(addr);
     //这里要复现bug, 2FF + 1 = 200
     uint8_t addr_low = addr & 0xFF;
     addr_low++;
     addr = (addr & 0xFF00) | (uint16_t)addr_low;
-    high = (uint16_t)cpu.bus->cpu_read(addr);
+    high = (uint16_t)Bus::get().cpu_read(addr);
     addr = (high<<8) | low;
     return addr;
 }
 
 uint16_t izx() {
     cpu.op_length = 2;
-    uint8_t addr = cpu.bus->cpu_read(cpu.pc + 1) + cpu.x;
-    uint16_t low = (uint16_t)cpu.bus->cpu_read(addr);   
+    uint8_t addr = Bus::get().cpu_read(cpu.pc + 1) + cpu.x;
+    uint16_t low = (uint16_t)Bus::get().cpu_read(addr);   
     addr++;
-    uint16_t high = (uint16_t)cpu.bus->cpu_read(addr);
+    uint16_t high = (uint16_t)Bus::get().cpu_read(addr);
     return (high<<8) | low;
 }
 
 uint16_t izy() {
     cpu.op_length = 2;
-    uint8_t m = cpu.bus->cpu_read(cpu.pc + 1);
-    uint16_t low = (uint16_t)cpu.bus->cpu_read(m);
+    uint8_t m = Bus::get().cpu_read(cpu.pc + 1);
+    uint16_t low = (uint16_t)Bus::get().cpu_read(m);
     m++;
-    uint16_t high = (uint16_t)cpu.bus->cpu_read(m)<<8;
+    uint16_t high = (uint16_t)Bus::get().cpu_read(m)<<8;
     uint16_t addr = (high | low) + (uint16_t)cpu.y;
-    if ((addr & 0xFF00) != high) cpu.next_clock_cycle++;
+    if ((addr & 0xFF00) != high) Timing::step_cpu_tick(1);
     return addr;
 }
 
 uint16_t rel() {
     cpu.op_length = 2;
-    uint16_t addr = (uint16_t)cpu.bus->cpu_read(cpu.pc + 1);
+    uint16_t addr = (uint16_t)Bus::get().cpu_read(cpu.pc + 1);
     if (IS_NEG(addr)) {
         addr |= 0xFF00;
     }

@@ -5,3 +5,4 @@ out
 
 *.tmp
 nestest.log.txt
+nestest_disassemble.txt

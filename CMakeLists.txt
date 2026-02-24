@@ -15,6 +15,8 @@ src/cartridge.cpp
 src/bus.cpp
 src/cpu.cpp
 src/mapper.cpp
+src/timing.cpp
+src/window.cpp
 )
 
 set(headers 
@@ -29,7 +31,7 @@ src/include/types.h
 
 find_package(SDL3 REQUIRED CONFIG)
 
-set(sources ${sources} src/test/check_log.hpp)
+# set(sources ${sources} src/test/check_log.hpp)
 
 add_executable(${PROJECT_NAME})
 
