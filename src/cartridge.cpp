@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <cassert>
+#include <log.h>
 
 using std::shared_ptr;
 using std::unique_ptr;
@@ -34,8 +35,8 @@ shared_ptr<Cartridge> load_nes_file(const char *filename) {
     file.open(filename, std::ios::in);
     if (!file.is_open()) {
         //读取错误
-        fputs("Error file", stderr);
-        exit(1);
+        LOG("Error file");
+        return nullptr;
     }
     Nes_header header;
     file.read((char *)&header, sizeof(Nes_header));
@@ -49,8 +50,12 @@ shared_ptr<Cartridge> load_nes_file(const char *filename) {
 
     shared_ptr cart = make_shared<Cartridge>();
     cart->prg_rom_size = header.PRG_rom * 16384;
-    cart->chr_rom_size = header.CHR_rom * 8192;
+    //这里可能不存在chr_rom, 则使用chr_ram
+    if (header.CHR_rom) cart->chr_rom_size = header.CHR_rom * 8192;
+    else cart->chr_rom_size = 8192;
     cart->prg_ram_size = header.PRG_ram ? header.PRG_ram * 8192 : 8192;
+    LOG("PRG ROM: %lx bytes\n"
+        "CHR ROM: %lx bytes\n", cart->prg_rom_size, cart->chr_rom_size);
 
     cart->is_nes2 = (header.flag7 & 0b1100) == 0b1000;
     cart->mapper = ((header.flag6 & 0xF0) >> 4) | (header.flag7 & 0xF0);

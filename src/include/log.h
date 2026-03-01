@@ -1,4 +1,9 @@
 #pragma once
 
-#include <stdio.h>
-#define LOG(args...) printf(args) 
+#include <SDL3/SDL_log.h>
+
+#ifdef DEBUG
+#define LOG SDL_Log
+#else
+#define LOG (void)
+#endif

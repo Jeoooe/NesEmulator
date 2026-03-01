@@ -4,6 +4,7 @@
 #pragma once
 #include <SDL3/SDL.h>
 #include <array>
+#include <const.h>
 
 
 class EmulatorWindow {
@@ -16,8 +17,6 @@ public:
         return running;
     }
 private:
-    static constexpr int width  = 256;
-    static constexpr int height = 240;
     std::array<Uint32, width * height> buffer;
     SDL_Window *window = nullptr;
     SDL_Renderer *renderer = nullptr;

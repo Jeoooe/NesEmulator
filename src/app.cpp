@@ -39,8 +39,6 @@ private:
 };
 
 
-void ppu_test();
-
 void key_event(SDL_Event *event) {
     auto &ctrl = Bus::get().get_controller();
     int type = event->type == SDL_EVENT_KEY_DOWN ? 1 : 0;
@@ -87,8 +85,13 @@ void Application::start(int argc, char *argv[]) {
         throw std::invalid_argument("Need at least 1 argument");
     }
     auto cart = load_nes_file(argv[1]);
+
+    if (!cart) {
+        exit(-1);
+    }
+
     auto &bus = Bus::get();
-    auto &cpu = get_cpu();
+    auto &cpu = bus.get_CPU();
 
     bus.load_cart(std::move(cart));
 
@@ -100,6 +103,7 @@ void Application::start(int argc, char *argv[]) {
     EmulatorWindow window;
 
     //主逻辑
+    auto &ppu = Bus::get().get_PPU();  
     while (window.is_running()) {
         SDL_Event event;
         while (window.poll_event(&event)) {
@@ -107,37 +111,23 @@ void Application::start(int argc, char *argv[]) {
                 key_event(&event);
             }
         }
-
-        auto last_tick = Timing::get_current_tick() + PPU::total_frame_ticks;
-        while (Timing::get_current_tick() < last_tick) {
-            Bus::get().get_CPU().run1operation();
-            Bus::get().get_PPU()->scan();
+        
+        while (!ppu->is_frame_end()) {
+            cpu.run1operation();
+            ppu->scan();
         }
         
         window.render();
     }
 #else 
     FrameTimer timer;
+    auto &ppu = bus.get_PPU();  
     while (true) {
-        auto last_tick = Timing::get_current_tick() + PPU::total_frame_ticks;
-        while (Timing::get_current_tick() < last_tick) {
-            Bus::get().get_CPU().run1operation();
-            Bus::get().get_PPU()->scan();
+        while (!ppu->is_frame_end()) {
+            cpu.run1operation();
+            ppu->scan();
         }
-        ppu_test();
         // timer.wait_for_next_frame();
     }
 #endif
-}
-std::array<uint32_t, 256 * 240> buffer;
-void ppu_test() {
-    auto ppu = Bus::get().get_PPU();
-    for (int y = 0;y < 240;y++) {
-        for (int x = 0;x < 256/8;x++) {
-            auto pixels = ppu->get_pixels(x, y);
-            for (int i = 0;i < 8;i++) {
-                buffer[y * 256 + x * 8 + i] = pixels[i];
-            }
-        }
-    }
 }

@@ -87,16 +87,20 @@ void EmulatorWindow::render() {
     void *texture_buffer;
     int pitch;
     if (SDL_LockTexture(gamepad_texture, nullptr, &texture_buffer, &pitch)) {
-        auto ppu = Bus::get().get_PPU();
+        // auto ppu = Bus::get().get_PPU();
+        // Uint32 *buffer = (Uint32 *)texture_buffer;
+        // for (int y = 0;y < height;y++) {
+        //     for (int x = 0;x < width/8;x++) {
+        //         auto pixels = ppu->get_pixels(x, y);
+        //         for (int i = 0;i < 8;i++) {
+        //             buffer[y*width + x*8 + i] = palette[pixels[i]];
+        //         }
+        //     }
+        // }
+        // SDL_UnlockTexture(gamepad_texture);
+        auto &ppu_buffer = Bus::get().get_PPU()->get_window_buffer();
         Uint32 *buffer = (Uint32 *)texture_buffer;
-        for (int y = 0;y < height;y++) {
-            for (int x = 0;x < width/8;x++) {
-                auto pixels = ppu->get_pixels(x, y);
-                for (int i = 0;i < 8;i++) {
-                    buffer[y*width + x*8 + i] = palette[pixels[i]];
-                }
-            }
-        }
+        memcpy(buffer, ppu_buffer.data(), width * height * sizeof(Uint32));
         SDL_UnlockTexture(gamepad_texture);
     }
 

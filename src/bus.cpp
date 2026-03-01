@@ -58,8 +58,7 @@ uint8_t Bus::cpu_read(uint16_t addr) {
     
     //ROM
     if (addr >= 0x8000) {
-        addr = mapper->map_read(addr);
-        return cart->prg_rom[addr];
+        return mapper->cpu_map_read(addr);
     }
     return 0;
 }

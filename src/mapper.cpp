@@ -23,26 +23,34 @@ public:
         return addr;
     }
 
+    //0x8000以上
+    virtual uint8_t cpu_map_read(uint16_t addr) override {
+        addr -= 0x8000;
+        return cart->prg_rom[is_nrom_128 ? (addr & ~0x4000) : addr];
+    };
+    virtual void cpu_map_write(uint16_t addr, uint8_t value) override {
+        addr -= 0x8000;
+        cart->prg_rom[is_nrom_128 ? (addr & ~0x4000) : addr] = value;
+    }
+
     virtual uint8_t ppu_map_read(uint16_t addr) override {
         auto &cart = Bus::get().get_cart();
-        if (addr < cart->chr_rom.size()) {
-            return cart->chr_rom[addr];
-        }
-        return 0;
+        return cart->chr_rom[addr];
     }
     virtual void ppu_map_write(uint16_t addr, uint8_t value) override {
-        (void)addr;
-        (void)value;
+        cart->chr_rom[addr] = value;
     }
 };
 
-std::shared_ptr<Mapper> MapperFactory::create_mapper(const std::shared_ptr<Cartridge> &cart) {
+std::shared_ptr<Mapper> MapperFactory::create_mapper(const std::shared_ptr<Cartridge> &cart) noexcept {
+    std::shared_ptr<Mapper> mapper = nullptr;
     switch (cart->mapper) {
         case 0:
-            return std::make_shared<Mapper_000>(cart->is_nrom128);
+            mapper = std::make_shared<Mapper_000>(cart->is_nrom128);
 
-        default:
-            return std::shared_ptr<Mapper>();
+        default: 
+        break;
     }
-    return std::shared_ptr<Mapper>();
+    mapper->cart = cart;
+    return mapper;
 }

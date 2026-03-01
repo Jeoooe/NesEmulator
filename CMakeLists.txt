@@ -49,3 +49,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
 target_compile_definitions(${PROJECT_NAME} PRIVATE DEBUG)
 endif()
+
+if(DEFINED ANALYSIS)
+target_compile_options(${PROJECT_NAME} PRIVATE -pg)
+endif()

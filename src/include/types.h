@@ -1,3 +1,3 @@
 #pragma once
 
-typedef unsigned int cycle_t;
+typedef uint64_t cycle_t;

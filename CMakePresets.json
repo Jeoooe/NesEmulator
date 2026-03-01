@@ -2,15 +2,28 @@
     "version": 8,
     "configurePresets": [
         {
-            "name": "gcc",
+            "name": "debug",
             "displayName": "Debug",
-            "description": "正在使用编译器: C = /usr/bin/gcc, CXX = /usr/bin/g++",
+            "description": "gcc, g++, debug",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CMAKE_C_COMPILER": "/usr/bin/gcc",
                 "CMAKE_CXX_COMPILER": "/usr/bin/g++",
                 "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "gcc",
+            "displayName": "性能分析",
+            "description": "gcc, g++, debug, gprof",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "/usr/bin/gcc",
+                "CMAKE_CXX_COMPILER": "/usr/bin/g++",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "ANALYSIS": "ON"
             }
         }
 ]

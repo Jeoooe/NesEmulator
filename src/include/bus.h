@@ -28,11 +28,14 @@ public:
     };
 
     CPU &get_CPU();
-    inline std::shared_ptr<PPU> &get_PPU() {
+    inline auto &get_PPU() {
         return ppu;
     }
-    inline std::shared_ptr<Cartridge> &get_cart() {
+    inline auto &get_cart() {
         return cart;
+    }
+    inline auto &get_cpu_ram() {
+        return cpu_ram;
     }
 
     inline std::shared_ptr<Controller> &get_controller() {
