@@ -36,11 +36,9 @@ private:
         uint8_t high;
     };
 
-    /// @brief 获取名称表对应的8个像素
-    /// @param x 行像素索引, 对应像素点坐标为`[x * 8, x * 8 + 7]`. 范围为 `0-32`
-    /// @param y 列像素索引, 范围为`0-240`
+    /// @brief 获取目前regv指示名称表的瓦片的八个像素
     /// @return 8个像素的调色板索引
-    auto get_pixels(unsigned int x, unsigned int y, uint16_t name_table) -> std::array<uint8_t, 8>;
+    auto get_pixels() -> std::array<uint8_t, 8>;
 
     /// @brief 获取图案表中一个瓦片的一行像素
     /// @param index 图案表瓦片索引
@@ -57,11 +55,11 @@ private:
 
     /// @brief 渲染一行精灵
     /// @param line 行
-    auto render_sprites_one_line(unsigned int line) -> void;
+    auto render_sprites_one_line() -> void;
 
     /// @brief 渲染一行背景
     /// @param line 行
-    auto render_background_one_line(unsigned int line) -> void;
+    auto render_background_one_line() -> void;
 
     //下面是变量
 public:
@@ -76,14 +74,22 @@ private:
         0x3F00 - 0x3F1F: Palette RAM index 调色板
         0x3F20 - 0x3FFF: Mirrors of 0x3F00 - 0x3F1F
     */
-    std::array<uint32_t, width * height> window_buffer; //屏幕像素的缓冲区
+    std::array<uint8_t, width> render_buffer; //渲染缓冲区, 存储调色板索引
+    std::array<uint32_t, width * height>  window_buffer; //屏幕像素的缓冲区, 存储最终的颜色
     std::array<uint8_t, 0x1000> ppu_bus;        //专用总线 2kb 调色板单独拿出来
     std::array<uint8_t, 0x1F> palette_indexes;  //调色板
     std::array<uint8_t, 0x100> OAM;               //OAM精灵内存, 64个精灵
     //内部寄存器
-    uint8_t regw = 0;   
-    uint8_t regx = 0;
-    uint16_t regv = 0;
+    uint8_t regw = 0;       //1bit 控制二次写入
+    uint8_t regx = 0;       //3bit 控制瓦片内X偏移
+
+    /* 15bit
+    `yyy NN YYYYY XXXXX`
+    */
+    uint16_t regv = 0;   
+    /* 15bit
+    `yyy NN YYYYY XXXXX`
+    */   
     uint16_t regt = 0;
     //暴露的寄存器
     uint8_t reg2000 = 0;
@@ -92,16 +98,17 @@ private:
     uint8_t reg2003 = 0;
     // uint8_t reg2004 = 0;
     // uint8_t reg2005 = 0;
-    uint8_t scroll_X = 0;
-    uint8_t scroll_Y = 0;
+    // uint8_t scroll_X = 0;
+    // uint8_t scroll_Y = 0;
     // std::array<uint8_t, 0x8> reg{0, 0, 0, 0, 0, 0, 0, 0};           //八个寄存器 没有多线程安全
     // uint8_t reg4014 = 0;
            //部分寄存器需要连续写入
 
     //部分比较特殊的寄存器
-    uint16_t reg2006 = 0;
+    // uint16_t reg2006 = 0;
     uint8_t vram_buffer = 0;        //VRAM的缓冲区
 
     bool is_vblank = false;                 //是否处于vblank状态
+    //设置为-2时, 标志该帧结束, 并且检测之后会置为-1
     int current_scanline = 0;  // 当前扫描行
 };

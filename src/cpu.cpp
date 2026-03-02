@@ -92,8 +92,8 @@ void CPU::run1operation() {
     } 
     if (is_IRQ) {  //这里应该有个IRQ屏蔽位?
         //如果有NMI中断来
-        uint16_t low = Bus::get().cpu_read(0xFFFA);
-        uint16_t high = (u_int16_t)Bus::get().cpu_read(0xFFFB) << 8;
+        uint16_t low = Bus::get().cpu_read(0xFFFE);
+        uint16_t high = (uint16_t)Bus::get().cpu_read(0xFFFF) << 8;
         PUSH(pc);
         PUSH(p);
         pc = low | high;

@@ -13,6 +13,15 @@
 #define D5 32
 #define D6 64
 #define D7 128
+#define D8 0x100
+#define D9 0x200
+#define D10 0x400
+#define D11 0x800
+#define D12 0x1000
+#define D13 0x2000
+#define D14 0x4000
+#define D15 0x8000
+
 
 inline constexpr uint16_t vram_start = 0x2000; 
 inline constexpr cycle_t ONE_LINE_TICK = 341;
@@ -37,8 +46,8 @@ static const uint32_t nes_palette[64] = {
 };
 
 bool PPU::is_frame_end() {
-    if (current_scanline == -1) {
-        current_scanline = 0;
+    if (current_scanline == -2) {
+        current_scanline = -1;
         return true;
     }
     return false;
@@ -46,6 +55,16 @@ bool PPU::is_frame_end() {
 
 bool PPU::is_rendering() {
     return !is_vblank && (reg2001 & (D3 | D4));
+}
+
+//映射自己的显存
+inline uint16_t ppu_ram_map(uint16_t addr) {
+    /*暂时只有垂直镜像, 即 
+        A | B
+        -----
+        A | B
+    */
+    return addr >= 0x800 ? addr - 0x800 : addr;
 }
 
 uint8_t PPU::cpu_read(uint16_t addr) {
@@ -80,8 +99,8 @@ uint8_t PPU::cpu_read(uint16_t addr) {
         return 0;   //这个应该不能读
     case 0x2007:
     {    
-        uint8_t value = ppu_ram_read(reg2006);
-        reg2006 += (reg2000 & D2) ? 32 : 1;
+        uint8_t value = ppu_ram_read(regv);
+        regv += (reg2000 & D2) ? 32 : 1;
         return value;
     }
     case 0x4014:
@@ -101,17 +120,21 @@ void PPU::cpu_write(uint16_t addr, uint8_t value) {
     if (addr >= 0x2000 && addr < 0x4000) {
         addr &= 0x2007;
     }
+    
+    /*
+        这里寄存器的写入行为非常多
+        参见 https://www.nesdev.org/wiki/PPU_scrolling
+    */
 
     switch (addr) {
     case 0x2000:
         reg2000 = value;
+        regt &= ~0x0C00;
+        regt |= ((uint16_t)value & 0x3) << 10;
         break;
 
     case 0x2001:
         reg2001 = value;
-        break;
-
-    case 0x2002:
         break;
 
     case 0x2003:
@@ -121,26 +144,33 @@ void PPU::cpu_write(uint16_t addr, uint8_t value) {
         OAM[reg2003++] = value;
         break;
     case 0x2005:
-        if (regw) {
-            scroll_Y = value;
-            regw = 0x2005;
+        if (!regw) {
+            regt &= ~0b11111;
+            regt |= value >> 3;
+            regx = value & 0x7;
+            regw = 1;
         } else {
-            scroll_X = value;
+            regt &= ~0b111001111100000;
+            regt |= ((uint16_t)value & 0b11111000) << 2;
+            regt |= ((uint16_t)value & 0b111) << 12;
             regw = 0;
         }
         break;
     case 0x2006:
-        if (regw == 0) {
-            reg2006 = (uint16_t)value << 8;
-            regw = 0x2006;
+        if (!regw) {
+            regt &= ~0x7F00;
+            regt |= (uint16_t)(value & 0x3F) << 8;
+            regw = 1;
         } else {
-            reg2006 |= (uint16_t)value;
+            regt &= ~0x00FF;
+            regt |= (uint16_t)value;
             regw = 0;
+            regv = regt;
         }
         break;
     case 0x2007:
-        ppu_ram_write(reg2006, value);
-        reg2006 += (reg2000 & D2) ? 32 : 1;
+        ppu_ram_write(regv, value);
+        regv += (reg2000 & D2) ? 32 : 1;
         break;
     case 0x4014:
         //这里触发DMA直接存储
@@ -150,7 +180,6 @@ void PPU::cpu_write(uint16_t addr, uint8_t value) {
             //2. 时钟周期不同
             Timing::step_cpu_tick(512); //直接占用512周期?无所谓了, 先这样
             size_t r_addr = (size_t)value << 8;
-            size_t start_offset = (size_t)reg2003;
             memcpy(
                 (void *)(OAM.data() + reg2003), 
                 (void *)(Bus::get().get_cpu_ram().data() + r_addr),
@@ -177,12 +206,13 @@ void PPU::cpu_write(uint16_t addr, uint8_t value) {
 /// @param from_cpu 是否由cpu读取. cpu读取返回值为缓冲值, 即上次读取的值
 /// @return
 uint8_t PPU::ppu_ram_read(uint16_t addr) {
+    addr &= 0x3FFF;
     if (addr < 0x2000) {
         return Bus::get().ppu_read(addr);
     } 
     if (addr < 0x3000) {
         const uint8_t snapshot = vram_buffer;
-        vram_buffer = ppu_bus[addr -vram_start];
+        vram_buffer = ppu_bus[addr - 0x2000];
         return snapshot;
     } else if (addr < 0x3F00) {
         //这里是不使用的区域
@@ -200,6 +230,7 @@ uint8_t PPU::ppu_ram_read(uint16_t addr) {
 /// @param value 写入值
 /// @return 
 void PPU::ppu_ram_write(uint16_t addr, uint8_t value) {
+    addr &= 0x3FFF; //忽略高2位
     if (addr < 0x2000) {
         // return; //ROM应该不可写
         // FIX: 考虑到有CHR_RAM这种行为
@@ -207,18 +238,21 @@ void PPU::ppu_ram_write(uint16_t addr, uint8_t value) {
         return;
     }
     if (addr < 0x3000) {
-        ppu_bus[addr - vram_start] = value;
+        ppu_bus[addr - 0x2000] = value;
         return;
     } 
     if (addr < 0x3F00) {
         return;
     } else {
-        if (addr & 3) {
+        if ((addr & 0x0F) == 0) {
+            palette_indexes[0x0] = palette_indexes[0x4] = 
+            palette_indexes[0x8] = palette_indexes[0xC] = 
+            palette_indexes[0x10] = value;
+        } else if (addr & 3) {
             palette_indexes[addr & 0x1F] = value;
         } else {
             addr &= 0x0F;
-            palette_indexes[0x0] = palette_indexes[0x4] = palette_indexes[0x8] =
-            palette_indexes[0xC] = palette_indexes[addr | 0x10] = value;
+            palette_indexes[addr] = palette_indexes[addr | 0x10] = value;
         }
     }
 }
@@ -235,16 +269,31 @@ void PPU::scan() {
 
 
 void PPU::scan_one_line() {  
-    // 判断是否在可见扫描线区域（0-239为可见扫描线）
-    if (current_scanline < 240) {
-        //这里仅仅是把window_buffer的值设置为调色板的索引
-        render_background_one_line(current_scanline);
-        render_sprites_one_line(current_scanline);
+    //Pre-render
+    if (current_scanline == -1) {
+        //更新数据  
+        reg2002 &= ~D7;
+        is_vblank = false;
+        /*
+            FIX:这里是极其严重的bug
+            当PPU处于关闭渲染状态时, -1扫描线不会对寄存器进行操作
+        */
+        if (is_rendering()) {
+            regv &= ~0b111101111100000;
+            regv |= regt & 0b111101111100000;    
+        }
     }
-    
-    // 更新扫描线计数
-    current_scanline++;
-    if (current_scanline == 240) {
+    // 判断是否在可见扫描线区域（0-239为可见扫描线）
+    if (0 <= current_scanline && current_scanline <= 239) {
+        //这里仅仅是把window_buffer的值设置为调色板的索引
+        render_background_one_line();
+        render_sprites_one_line();
+        for (int i = 0;i < width;i++) {
+            window_buffer[current_scanline*width + i] = nes_palette[palette_indexes[render_buffer[i]]];
+        }
+    }
+
+    if (current_scanline == 241) {
         //开启vblank
         is_vblank = true;
         reg2002 |= D7;
@@ -252,60 +301,83 @@ void PPU::scan_one_line() {
             Bus::get().get_CPU().trigger_NMI();
         }
     }
-    if (current_scanline >= 262) {
-        current_scanline = -1;  //-1则为帧结束
-        //更新数据
-        reg2002 &= ~D7;
-        is_vblank = false;
-        //这里加载像素的颜色
-        for (int i = 0;i < width * height;i++) {
-            window_buffer[i] = nes_palette[palette_indexes[window_buffer[i]]];
-        }
+
+    if (current_scanline == 260) {
+        current_scanline = -2;  //-2则为帧结束
+        return;
     }
+    
+    // 更新扫描线计数
+    current_scanline++;
 }
 
-auto PPU::render_background_one_line(unsigned int line) -> void
-{
+auto PPU::render_background_one_line() -> void {
+    if (!(reg2001 & D3)) {
+        //没有开启背景显示
+        //直接设置为通用背景色
+        memset(render_buffer.data(), 0, 256);
+        return;
+    }
     //有滚动就比较复杂
     //不考虑镜像
-    const unsigned int row = (line + scroll_Y) % 240;
-    uint16_t name_table = ((reg2000 & 0x03) * 0x400);  // 当前使用的名字表
-    const int start_col = scroll_X & 7;
-    const uint8_t tile_offset = scroll_X>>3;
-    int col = 0;
+    unsigned int col = 0;
     //第一个瓦片存在偏移
-    {
-        int x = tile_offset;
-        auto pixels = get_pixels(x, row, name_table);
-        for (int offset = start_col; offset < 8; offset++) {   
-            window_buffer[line*width + col] = pixels[offset];
-            col++;
+    for (int i = 0;i < 33 && col < 256;i++) {
+        //或许可以直接读取33个图块
+        auto pixels = get_pixels();
+        if (col < 8u - regx) {
+            for (;col < 8u - regx;col++) {
+                render_buffer[col] = pixels[regx + col];
+            }
+        } else if (256 - col < 8) {
+            //最后一个图块的偏移
+            for (unsigned int j = col;j < 256;j++) {
+                render_buffer[j] = pixels[j - col];
+            }
+        } else {
+            //中间的图块
+            for (unsigned int j = 0;j < 8;j++) {
+                render_buffer[col++] = pixels[j];
+            }
+        }
+        //这里进行X增加
+        if ((regv & 0x001F) == 31) {
+            regv &= ~0x001F;
+            regv ^= 0x0400;
+        } else {
+            regv++;
         }
     }
-    for (int t = 1; t < 32; t++) {
-        int x = t + tile_offset;
-        auto pixels = get_pixels(x & 0x1F, row, x > 32 ? ((name_table + 0x400) & 0x400) : name_table);
-        // auto pixels = get_pixels(x & 0x1F, row, name_table);
-        for (int i = 0;i < 8;i++) {   
-            window_buffer[line*width + col] = pixels[i];
-            col++;
+
+    //一行结束, 增加Y, 重置X
+    if ((regv & 0x7000) != 0x7000) { //fine Y < 7
+        regv += 0x1000;
+    } else {
+        regv &= ~0x7000;
+        int y = (regv & 0x03E0) >> 5;   //coarse_y
+        if (y == 29) {
+            y = 0;
+            regv ^= 0x0800;
+        } else if (y == 31) {
+            y = 0;
+        } else {
+            y += 1;
         }
+        regv = (regv & ~0x03E0) | (y << 5);
     }
-    //最后还可能有个瓦片
-    if (start_col) {
-        int x = 32 + tile_offset;
-        auto pixels = get_pixels(x & 0x1F, row, x > 32 ? ((name_table + 0x400) & 0x400) : name_table);
-        // auto pixels = get_pixels(x & 0x1F, row, name_table);
-        for (int i = 0;i < start_col;i++) {   
-            window_buffer[line*width + col] = pixels[i];
-            col++;
-        }
-    }
+    //重置X
+    regv &= ~0b000010000011111;
+    regv |= regt & 0b000010000011111;
 }
 
 
 
-auto PPU::render_sprites_one_line(unsigned int line) -> void {
+auto PPU::render_sprites_one_line() -> void {
+    const uint8_t line = current_scanline;
+    if (!(reg2001 & D4)) {
+        //不显示精灵
+        return;
+    }
     //遍历精灵, 选出前八个
     uint16_t pattern_table = (reg2002 & D3) ? 0 : 0x1000;
     bool is_8x16 = reg2000 & D5;
@@ -373,35 +445,37 @@ auto PPU::render_sprites_one_line(unsigned int line) -> void {
             //精灵优先级
             if (!(sprites[i].attr & D5)) {
                 //优先级为0, 精灵在背景前
-                window_buffer[line*width + sprites[i].x + j] = pixel;
-            } else if (!(window_buffer[line*width + sprites[i].x] & 3)) {
+                render_buffer[sprites[i].x + j] = pixel;
+            } else if (!(render_buffer[sprites[i].x] & 3)) {
                 //背景是透明色
-                window_buffer[line*width + sprites[i].x + j] = pixel;
+                render_buffer[sprites[i].x + j] = pixel;
             }
         }
     }
 }
 
-auto PPU::get_pixels(unsigned int x, unsigned int y, uint16_t name_table) -> std::array<uint8_t, 8> {
+//获取背景瓦片
+auto PPU::get_pixels() -> std::array<uint8_t, 8> {
 
     //这里开始获取颜色
     //先获取调色板entry
-    const uint16_t attribute_table = name_table + 0x3C0;
-    const uint16_t attribute_index = (y >> 5)*8 + (x>>2);
-    const uint16_t attribute = ppu_bus[attribute_table + attribute_index];
-    const uint8_t attribute_offset = (x & 0x2) | ((y & 0x10) >> 2);
+    const uint16_t tile_addr = regv & 0x0FFF;
+    const uint16_t attribute_addr = 0x03C0 | (regv & 0x0C00) | ((regv >> 4) & 0x38) | ((regv >> 2) & 0x07);
+    const uint16_t attribute = ppu_bus[attribute_addr];
+    const uint8_t attribute_offset = (regv & 0x2) | ((regv & 0x60) >> 3);
     const uint8_t palette_entry = ((attribute >> attribute_offset) & 0x3) << 2;
 
     //然后看图案表
     //确定图案表
     const uint16_t pattern_table = (reg2000 & D4) ? 0x1000 : 0;
     //获取图案表tile地址
-    const uint16_t pattern_index = (uint16_t)ppu_bus[name_table + (y >> 3)*32 + x];
-    const TileRow tile_row = get_tile_pixels(pattern_index, pattern_table, y&7);
+    const uint16_t pattern_index = (uint16_t)ppu_bus[tile_addr];
+    const TileRow tile_row = get_tile_pixels(pattern_index, pattern_table, (regv >> 12) & 0x7);
     return decode_tile(tile_row, palette_entry);
 }
 
 auto PPU::get_tile_pixels(uint16_t index, uint16_t pattern_table, uint8_t row_in_tile) -> TileRow {
+    // LOG("Tile %d, pattern_table=0x%04X, addr=0x%04X", index, pattern_table, pattern_table + (index<<4));
     return TileRow {
         Bus::get().ppu_read(pattern_table + (index<<4) + row_in_tile),
         Bus::get().ppu_read(pattern_table + (index<<4) + row_in_tile + 8)

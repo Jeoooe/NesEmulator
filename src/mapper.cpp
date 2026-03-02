@@ -34,7 +34,6 @@ public:
     }
 
     virtual uint8_t ppu_map_read(uint16_t addr) override {
-        auto &cart = Bus::get().get_cart();
         return cart->chr_rom[addr];
     }
     virtual void ppu_map_write(uint16_t addr, uint8_t value) override {
