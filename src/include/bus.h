@@ -22,7 +22,7 @@ public:
     ~Bus() = default;
     Bus(const Bus &bus) = delete;
     Bus(const Bus &&bus) = delete;
-    static inline Bus &get() {
+    static inline constexpr Bus &get() {
         static Bus instance;
         return instance;
     };

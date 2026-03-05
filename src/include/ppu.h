@@ -5,6 +5,10 @@
 #include <array>
 #include <const.h>
 
+#ifdef TEST_WINDOW
+class DebugEmulatorWindow;
+#endif
+
 class PPU {
 public:
     PPU() = default;
@@ -17,11 +21,24 @@ public:
     uint8_t cpu_read(uint16_t addr);
     void cpu_write(uint16_t addr, uint8_t value);
     void scan();
+    void reset();
 
     /// @brief 
     /// @return 该帧是否结束
     bool is_frame_end();
 
+    #ifdef TEST_WINDOW
+    void set_window(DebugEmulatorWindow* wind) {
+        window = wind;
+    }
+
+    /// @brief 调试用, 直接渲染出整个名称表
+    /// @param window 
+    /// @return 
+    auto render_full_screen(DebugEmulatorWindow *window) -> void;
+
+    void update_tile(unsigned int index);
+    #endif
 private:
     bool is_rendering();
     uint8_t ppu_ram_read(uint16_t addr);
@@ -77,7 +94,7 @@ private:
     std::array<uint8_t, width> render_buffer; //渲染缓冲区, 存储调色板索引
     std::array<uint32_t, width * height>  window_buffer; //屏幕像素的缓冲区, 存储最终的颜色
     std::array<uint8_t, 0x1000> ppu_bus;        //专用总线 2kb 调色板单独拿出来
-    std::array<uint8_t, 0x1F> palette_indexes;  //调色板
+    std::array<uint8_t, 0x20> palette_indexes;  //调色板
     std::array<uint8_t, 0x100> OAM;               //OAM精灵内存, 64个精灵
     //内部寄存器
     uint8_t regw = 0;       //1bit 控制二次写入
@@ -95,7 +112,7 @@ private:
     uint8_t reg2000 = 0;
     uint8_t reg2001 = 0;
     uint8_t reg2002 = 0;
-    uint8_t reg2003 = 0;
+    uint8_t OAMADDR = 0;
     // uint8_t reg2004 = 0;
     // uint8_t reg2005 = 0;
     // uint8_t scroll_X = 0;
@@ -111,4 +128,8 @@ private:
     bool is_vblank = false;                 //是否处于vblank状态
     //设置为-2时, 标志该帧结束, 并且检测之后会置为-1
     int current_scanline = 0;  // 当前扫描行
+
+    #ifdef TEST_WINDOW
+    DebugEmulatorWindow *window;
+    #endif
 };

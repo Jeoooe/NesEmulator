@@ -4,6 +4,7 @@
 #include <chrono>
 #include <thread>
 #include <types.h>
+#include <const.h>
 #include <cartridge.h>
 #include <bus.h>
 #include <cpu.h>
@@ -11,8 +12,6 @@
 #include <timing.h>
 #include <window.h>
 #include <controller.h>
-
-// #define NO_UI
 
 static constexpr double NTSC_CPU_CLOCK = 1789772.5;
 static constexpr double FRAMES_PER_SECOND = 60.1;
@@ -92,6 +91,7 @@ void Application::start(int argc, char *argv[]) {
 
     auto &bus = Bus::get();
     auto &cpu = bus.get_CPU();
+    auto &ppu = Bus::get().get_PPU();  
 
     bus.load_cart(std::move(cart));
 
@@ -100,10 +100,15 @@ void Application::start(int argc, char *argv[]) {
 
 #ifndef NO_UI
     //创建模拟器窗口
+    #ifndef TEST_WINDOW
     EmulatorWindow window;
+    #else 
+    DebugEmulatorWindow window;
+    ppu->set_window(&window);
+    #endif
 
     //主逻辑
-    auto &ppu = Bus::get().get_PPU();  
+    
     while (window.is_running()) {
         SDL_Event event;
         while (window.poll_event(&event)) {
@@ -116,18 +121,28 @@ void Application::start(int argc, char *argv[]) {
             cpu.run1operation();
             ppu->scan();
         }
-        
+        #ifdef TEST_WINDOW
+        ppu->render_full_screen(&window);
+        #endif
         window.render();
     }
 #else 
     FrameTimer timer;
-    auto &ppu = bus.get_PPU();  
+    #ifndef TEST_WINDOW
+    EmulatorWindow window;
+    #else 
+    DebugEmulatorWindow window;
+    ppu->set_window(&window);
+    #endif
     while (true) {
         while (!ppu->is_frame_end()) {
             cpu.run1operation();
             ppu->scan();
         }
-        // timer.wait_for_next_frame();
+        timer.wait_for_next_frame();
+        #ifdef TEST_WINDOW
+        ppu->render_full_screen(&window);
+        #endif
     }
 #endif
 }

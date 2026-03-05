@@ -2,57 +2,10 @@
 #include <vector>
 #include <bus.h>
 #include <ppu.h>
-
-///
-/// 调色板数据
-///
-// const union sfc_palette_data {
-//     struct { uint8_t r, g, b, a; };
-//     uint32_t    data;
-// } sfc_stdpalette[64] = {
-//     { 0x7F, 0x7F, 0x7F, 0xFF }, { 0x20, 0x00, 0xB0, 0xFF }, { 0x28, 0x00, 0xB8, 0xFF }, { 0x60, 0x10, 0xA0, 0xFF },
-//     { 0x98, 0x20, 0x78, 0xFF }, { 0xB0, 0x10, 0x30, 0xFF }, { 0xA0, 0x30, 0x00, 0xFF }, { 0x78, 0x40, 0x00, 0xFF },
-//     { 0x48, 0x58, 0x00, 0xFF }, { 0x38, 0x68, 0x00, 0xFF }, { 0x38, 0x6C, 0x00, 0xFF }, { 0x30, 0x60, 0x40, 0xFF },
-//     { 0x30, 0x50, 0x80, 0xFF }, { 0x00, 0x00, 0x00, 0xFF }, { 0x00, 0x00, 0x00, 0xFF }, { 0x00, 0x00, 0x00, 0xFF },
-
-//     { 0xBC, 0xBC, 0xBC, 0xFF }, { 0x40, 0x60, 0xF8, 0xFF }, { 0x40, 0x40, 0xFF, 0xFF }, { 0x90, 0x40, 0xF0, 0xFF },
-//     { 0xD8, 0x40, 0xC0, 0xFF }, { 0xD8, 0x40, 0x60, 0xFF }, { 0xE0, 0x50, 0x00, 0xFF }, { 0xC0, 0x70, 0x00, 0xFF },
-//     { 0x88, 0x88, 0x00, 0xFF }, { 0x50, 0xA0, 0x00, 0xFF }, { 0x48, 0xA8, 0x10, 0xFF }, { 0x48, 0xA0, 0x68, 0xFF },
-//     { 0x40, 0x90, 0xC0, 0xFF }, { 0x00, 0x00, 0x00, 0xFF }, { 0x00, 0x00, 0x00, 0xFF }, { 0x00, 0x00, 0x00, 0xFF },
-
-//     { 0xFF, 0xFF, 0xFF, 0xFF }, { 0x60, 0xA0, 0xFF, 0xFF }, { 0x50, 0x80, 0xFF, 0xFF }, { 0xA0, 0x70, 0xFF, 0xFF },
-//     { 0xF0, 0x60, 0xFF, 0xFF }, { 0xFF, 0x60, 0xB0, 0xFF }, { 0xFF, 0x78, 0x30, 0xFF }, { 0xFF, 0xA0, 0x00, 0xFF },
-//     { 0xE8, 0xD0, 0x20, 0xFF }, { 0x98, 0xE8, 0x00, 0xFF }, { 0x70, 0xF0, 0x40, 0xFF }, { 0x70, 0xE0, 0x90, 0xFF },
-//     { 0x60, 0xD0, 0xE0, 0xFF }, { 0x60, 0x60, 0x60, 0xFF }, { 0x00, 0x00, 0x00, 0xFF }, { 0x00, 0x00, 0x00, 0xFF },
-
-//     { 0xFF, 0xFF, 0xFF, 0xFF }, { 0x90, 0xD0, 0xFF, 0xFF }, { 0xA0, 0xB8, 0xFF, 0xFF }, { 0xC0, 0xB0, 0xFF, 0xFF },
-//     { 0xE0, 0xB0, 0xFF, 0xFF }, { 0xFF, 0xB8, 0xE8, 0xFF }, { 0xFF, 0xC8, 0xB8, 0xFF }, { 0xFF, 0xD8, 0xA0, 0xFF },
-//     { 0xFF, 0xF0, 0x90, 0xFF }, { 0xC8, 0xF0, 0x80, 0xFF }, { 0xA0, 0xF0, 0xA0, 0xFF }, { 0xA0, 0xFF, 0xC8, 0xFF },
-//     { 0xA0, 0xFF, 0xF0, 0xFF }, { 0xA0, 0xA0, 0xA0, 0xFF }, { 0x00, 0x00, 0x00, 0xFF }, { 0x00, 0x00, 0x00, 0xFF }
-// };
-
-//NES使用的调色板
-constexpr std::array<Uint32, 64> palette {
-    0x7f7f7fff, 0x2000b0ff, 0x2800b8ff, 0x6010a0ff,
-    0x982078ff, 0xb01030ff, 0xa03000ff, 0x784000ff,
-    0x485800ff, 0x386800ff, 0x386c00ff, 0x306040ff,
-    0x305080ff, 0x000000ff, 0x000000ff, 0x000000ff,
-    0xbcbcbcff, 0x4060f8ff, 0x4040ffff, 0x9040f0ff,
-    0xd840c0ff, 0xd84060ff, 0xe05000ff, 0xc07000ff,
-    0x888800ff, 0x50a000ff, 0x48a810ff, 0x48a068ff,
-    0x4090c0ff, 0x000000ff, 0x000000ff, 0x000000ff,
-    0xffffffff, 0x60a0ffff, 0x5080ffff, 0xa070ffff,
-    0xf060ffff, 0xff60b0ff, 0xff7830ff, 0xffa000ff,
-    0xe8d020ff, 0x98e800ff, 0x70f040ff, 0x70e090ff,
-    0x60d0e0ff, 0x606060ff, 0x000000ff, 0x000000ff,
-    0xffffffff, 0x90d0ffff, 0xa0b8ffff, 0xc0b0ffff,
-    0xe0b0ffff, 0xffb8e8ff, 0xffc8b8ff, 0xffd8a0ff,
-    0xfff090ff, 0xc8f080ff, 0xa0f0a0ff, 0xa0ffc8ff,
-    0xa0fff0ff, 0xa0a0a0ff, 0x000000ff, 0x000000ff
-};
-
+#include <const.h>
 
 static constexpr double FRAME_INTERVAL_MS = 1000.0 / 60.1;  
+// static constexpr double FRAME_INTERVAL_MS = 500.0;  
 
 EmulatorWindow::EmulatorWindow() {
     SDL_SetLogPriorities(SDL_LOG_PRIORITY_VERBOSE);
@@ -101,6 +54,12 @@ void EmulatorWindow::render() {
         auto &ppu_buffer = Bus::get().get_PPU()->get_window_buffer();
         Uint32 *buffer = (Uint32 *)texture_buffer;
         memcpy(buffer, ppu_buffer.data(), width * height * sizeof(Uint32));
+        //包边
+        // const auto detail = SDL_PixelFormatDetails(SDL_PIXELFORMAT_RGBA8888);
+        // SDL_MapRGBA(&detail, nullptr, 0xFF, 0, 0, 0xFF);
+        // for (int i = 0;i < 30;i++) {
+        //     memset(buffer + i*256*8, 0xFF, 256 * sizeof(Uint32));
+        // }
         SDL_UnlockTexture(gamepad_texture);
     }
 
@@ -121,4 +80,87 @@ bool EmulatorWindow::poll_event(SDL_Event *event) {
     bool state = SDL_PollEvent(event);
     if (event->type == SDL_EVENT_QUIT) running = false;
     return state;
+}
+
+
+/*
+    以下是一个调试用窗口
+*/
+
+DebugEmulatorWindow::DebugEmulatorWindow() {
+    #ifndef NO_UI
+    SDL_SetLogPriorities(SDL_LOG_PRIORITY_VERBOSE);
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        SDL_Log("SDL_Init failed: %s", SDL_GetError());
+        throw std::runtime_error("SDL failed");
+    }
+    window = SDL_CreateWindow("Nes", test_width, height, 0);
+    if (!window) {
+        SDL_Log("Could not create a window: %s", SDL_GetError());
+        throw std::runtime_error("SDL failed");
+    }
+    renderer = SDL_CreateRenderer(window, nullptr);
+    if (!renderer) {
+        SDL_Log("Create renderer failed: %s", SDL_GetError());
+        throw std::runtime_error("SDL failed");
+    }
+    gamepad_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, test_width, height);    
+    #endif
+}
+
+DebugEmulatorWindow::~DebugEmulatorWindow() {
+    #ifndef NO_UI
+    SDL_DestroyTexture(gamepad_texture);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    #endif
+}
+
+void DebugEmulatorWindow::render() {
+    #ifndef NO_UI
+    // void *texture_buffer;
+    // int pitch;
+    // if (SDL_LockTexture(gamepad_texture, nullptr, &texture_buffer, &pitch)) {
+    //     Uint32 *window_buffer = (Uint32 *)texture_buffer;
+    //     memcpy(window_buffer, buffer.data(), test_width * height * sizeof(Uint32));
+    //     SDL_UnlockTexture(gamepad_texture);
+    // }
+
+    // SDL_RenderTexture(renderer, gamepad_texture, nullptr, nullptr);
+    // SDL_RenderPresent(renderer);
+
+    // SDL_Delay(FRAME_INTERVAL_MS);
+    #endif
+}
+
+void DebugEmulatorWindow::render_tile(unsigned int index) {
+    void *texture_buffer;
+    int pitch;
+    unsigned offset = (index & 0x400) >> 2;
+    if (SDL_LockTexture(gamepad_texture, nullptr, &texture_buffer, &pitch)) {
+        Uint32 *window_buffer = (Uint32 *)texture_buffer;
+        // memcpy(window_buffer, buffer.data(), test_width * height * sizeof(Uint32));
+        unsigned X = index & 0x1F;
+        unsigned Y = (index >> 5) & 0x1F;
+        for (int i = 0;i < 8;i++) {
+            for (int j = 0;j < 8;j++) {
+                window_buffer[(Y*8 + i)*test_width + X*8 + j + offset] = 
+                buffer[(Y*8 + i)*test_width + X*8 + j + offset];
+            }
+        }
+        SDL_UnlockTexture(gamepad_texture);
+    }
+
+    SDL_RenderTexture(renderer, gamepad_texture, nullptr, nullptr);
+    SDL_RenderPresent(renderer);
+    SDL_Delay(5);
+}
+
+bool DebugEmulatorWindow::poll_event(SDL_Event *event) {
+    #ifndef NO_UI
+    bool state = SDL_PollEvent(event);
+    if (event->type == SDL_EVENT_QUIT) running = false;
+    return state;
+    #endif
 }
