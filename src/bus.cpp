@@ -37,30 +37,31 @@ void Bus::cpu_write(uint16_t addr, uint8_t value) {
 }
 
 uint8_t Bus::cpu_read(uint16_t addr) {
+    static uint8_t open_bus = 0;
     //Ram
     if (addr < 0x2000) {
-        return cpu_ram[addr & 0x7FF];
+        open_bus = cpu_ram[addr & 0x7FF];
     }
 
     if (0x2000 <= addr && addr < 0x4000) {
         //PPU registers
-        return ppu->cpu_read(addr);
+        open_bus = ppu->cpu_read(addr);
     }
 
     if (addr == 0x4014) {
-        return ppu->cpu_read(addr);
+        open_bus = ppu->cpu_read(addr);
     }
 
     //Controller
     if (addr == 0x4016 || addr == 0x4017) {
-        return controller_device->cpu_read(addr);
+        open_bus = controller_device->cpu_read(addr);
     }
     
     //ROM
     if (addr >= 0x8000) {
-        return mapper->cpu_map_read(addr);
+        open_bus = mapper->cpu_map_read(addr);
     }
-    return 0;
+    return open_bus;
 }
 
 void Bus::ppu_write(uint16_t addr, uint8_t value) {

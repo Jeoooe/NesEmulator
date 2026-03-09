@@ -164,3 +164,9 @@ bool DebugEmulatorWindow::poll_event(SDL_Event *event) {
     return state;
     #endif
 }
+
+bool DebugEmulatorWindow::wait_event(SDL_Event *event) {
+    bool state = SDL_WaitEvent(event);
+    if (event->type == SDL_EVENT_QUIT) running = false;
+    return state;
+}

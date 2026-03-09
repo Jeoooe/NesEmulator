@@ -17,6 +17,7 @@ public:
     int mirroring;  //镜像类型
     bool is_nes2;   //是否是nes2.0系统
     bool is_nrom128;    //是否是NROM128系统
+    bool use_chr_ram;   //是否使用chr-ram
 };
 
 std::shared_ptr<Cartridge> load_nes_file(const char *filename);

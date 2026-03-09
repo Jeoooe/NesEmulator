@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include <bus.h>
+#include <cartridge.h>
 #include <const.h>
 #include <cpu.h>
 #include <log.h>
@@ -63,16 +64,23 @@ bool PPU::is_rendering() {
 
 //映射自己的显存
 inline uint16_t ppu_ram_map(uint16_t addr) {
-    /*暂时只有垂直镜像, 即 
-        A | B
-        -----
-        A | B
-    */
-    // return addr >= 0x800 ? addr - 0x800 : addr;
-    return addr & 0x07FF;
+    const auto &cart = Bus::get().get_cart();
+    const uint16_t table = (addr >> 10) & 0x3;
+    const uint16_t offset = addr & 0x03FF;
+    const int mirroring = cart ? cart->mirroring : 0;
+
+    switch (mirroring) {
+    case 1: // vertical: [A, B, A, B]
+        return ((table & 0x1) << 10) | offset;
+    case 2: // four-screen: [A, B, C, D]
+        return addr & 0x0FFF;
+    default: // horizontal: [A, A, B, B]
+        return (((table >> 1) & 0x1) << 10) | offset;
+    }
 }
 
 uint8_t PPU::cpu_read(uint16_t addr) {
+    static uint8_t latch = 0;
     //非vblank状态不进行处理
     // if (is_rendering()) return 0;
 
@@ -87,21 +95,22 @@ uint8_t PPU::cpu_read(uint16_t addr) {
         uint8_t snapshot = reg2002;
         reg2002 &= ~D7;
         regw = 0;
-        return snapshot;
+        // LOG("Read 2002: 0x%02x\n", snapshot);
+        return latch = snapshot;
     }
 
     case 0x2004:
-        return OAM[OAMADDR];
+        return latch = OAM[OAMADDR];
     case 0x2007:
     {    
         uint8_t value = ppu_ram_read(regv);
-        regv += (reg2000 & D2) ? 32 : 1;
-        return value;
+        regv += (uint16_t)((reg2000 & D2) ? 32 : 1);
+        regv &= 0x7FFF;
+        return latch = value;
     }
     default:
-        return 0;
+        return latch;
     }
-    return 0;   //一般不会到这里
 }
 
 void PPU::cpu_write(uint16_t addr, uint8_t value) {
@@ -119,12 +128,26 @@ void PPU::cpu_write(uint16_t addr, uint8_t value) {
 
     switch (addr) {
     case 0x2000:
-        reg2000 = value;
-        regt &= ~0x0C00;
-        regt |= ((uint16_t)value & 0x3) << 10;
+        {
+            bool old_nmi_enable = reg2000 & D7;
+            reg2000 = value;
+            regt &= ~0x0C00;
+            regt |= ((uint16_t)value & 0x3) << 10;
+            bool new_nmi_enable = reg2000 & D7;
+            // LOG("Write 2000: 0x%02x\n", reg2000);
+            /*
+                重大Bug修复
+                reg2000 NMI enable位的置位边沿才会触发vblank
+            */
+            //这里如果处于vblank状态, 且enable从0->1的边沿
+            if (is_vblank && !old_nmi_enable && new_nmi_enable) {
+                trigger_vblank();
+            }
+        }
         break;
 
     case 0x2001:
+        // LOG("Write in 2001: 0x%02x\n", value);
         reg2001 = value;
         break;
     case 0x2003:
@@ -139,28 +162,34 @@ void PPU::cpu_write(uint16_t addr, uint8_t value) {
             regt |= value >> 3;
             regx = value & 0x7;
             regw = 1;
+            // LOG("Write $2005 = 0x%02x",   value);
         } else {
             regt &= ~0b111001111100000;
             regt |= ((uint16_t)value & 0b11111000) << 2;
             regt |= ((uint16_t)value & 0b111) << 12;
             regw = 0;
+            // LOG("%02x\n", value);
         }
+        
         break;
     case 0x2006:
         if (!regw) {
             regt &= ~0x7F00;
             regt |= (uint16_t)(value & 0x3F) << 8;
             regw = 1;
+            // LOG("Write $2006: 0x%02x", value);
         } else {
             regt &= ~0x00FF;
             regt |= (uint16_t)value;
             regw = 0;
             regv = regt;
+            // LOG(" %02x\n", value);
         }
         break;
     case 0x2007:
         ppu_ram_write(regv, value);
-        regv += (reg2000 & D2) ? 32 : 1;
+        regv += (uint16_t)((reg2000 & D2) ? 32 : 1);
+        regv &= 0x7FFF;
         break;
     case 0x4014:
         //这里触发DMA直接存储
@@ -169,11 +198,16 @@ void PPU::cpu_write(uint16_t addr, uint8_t value) {
             //BUG
             //这里存在可能的Bug
             //2. 时钟周期不同
-            Timing::step_cpu_tick(513); //直接占用513周期?无所谓了, 先这样
             uint16_t offset = (uint16_t)value << 8;
             auto &ram = Bus::get().get_cpu_ram();
             for (int i = 0;i < 256;i++) {
                 OAM[OAMADDR++] = ram[offset++];
+            }
+            //这里需要同步扫描
+            //直接调用扫描五次应该就行了, 最多应该也就五行
+            Timing::step_cpu_tick(513); //直接占用513周期?无所谓了, 先这样
+            for (int i = 0;i < 5;i++) {
+                scan();
             }
         }
         break;
@@ -190,22 +224,22 @@ void PPU::cpu_write(uint16_t addr, uint8_t value) {
 uint8_t PPU::ppu_ram_read(uint16_t addr) {
     addr &= 0x3FFF;
     if (addr < 0x2000) {
-        return Bus::get().ppu_read(addr);
-    } 
-    if (addr < 0x3000) {
         const uint8_t snapshot = vram_buffer;
-        //这里需要映射显存?
+        vram_buffer = Bus::get().ppu_read(addr);
+        return snapshot;
+    } 
+    if (addr < 0x3F00) {
+        if (addr >= 0x3000) {
+            addr -= 0x1000;
+        }
+        const uint8_t snapshot = vram_buffer;
         vram_buffer = ppu_bus[ppu_ram_map(addr - 0x2000)];
         return snapshot;
     }
-    if (addr < 0x3F00) {
-        //这里是不使用的区域
-        return 0;
-    } 
-    
+
     {    //这里是调色板
+        vram_buffer = ppu_bus[ppu_ram_map(addr - 0x3000)];
         addr &= 0x1F;
-        vram_buffer = ppu_bus[ppu_ram_map(addr)];
         return palette_indexes[addr];
     }
 }
@@ -220,32 +254,47 @@ void PPU::ppu_ram_write(uint16_t addr, uint8_t value) {
     if (addr < 0x2000) {
         // return; //ROM应该不可写
         // FIX: 考虑到有CHR_RAM这种行为
-        Bus::get().ppu_write(addr, value);
+        if (Bus::get().get_cart()->use_chr_ram) {
+            Bus::get().ppu_write(addr, value);
+        }
         return;
     }
-    if (addr < 0x3000) {
+    if (addr < 0x3F00) {
+        if (addr >= 0x3000) {
+            addr -= 0x1000;
+        }
         addr = ppu_ram_map(addr - 0x2000);
         ppu_bus[addr] = value;
         #ifdef TEST_WINDOW
         //写入名称表就渲染一次
-        if (value && (addr & ~0xC000) < 0x3C0) {
+        if (value && (addr & ~0x0C00) < 0x3C0) {
             update_tile(addr);
             #ifndef NO_UI
             window->render_tile(addr);
             #endif
+            // if (addr >= 0x400) {
+            //     LOG("Write 0x%04x\n", addr);
+            // }
         }
         #endif
         return;
-    } 
-    if (addr < 0x3F00) {
-        return;
-    } else {
+    }
+    
+    {
         if (addr & 3) {
             palette_indexes[addr & 0x1F] = value;
         } else {
             addr &= 0x0F;
             palette_indexes[addr] = palette_indexes[addr | 0x10] = value;
         }
+    }
+}
+
+void PPU::trigger_vblank() {
+    //开启vblank, 处于vblank且未被触发过
+    if ((reg2000 & D7) && is_vblank && !vblank_triggered) {
+        Bus::get().get_CPU().trigger_NMI();
+        vblank_triggered = true;
     }
 }
 
@@ -273,18 +322,19 @@ void PPU::scan_one_line() {
         */
         if (is_rendering()) {
         // {
-            // regv &= ~0b111101111100000;
-            // regv |= regt & 0b111101111100000;    
-            // regv = regt;
+            // 预渲染线开始时, 把滚动目标地址恢复到当前VRAM地址。
+            // 否则CPU在vblank期间写名称表后留下的regv会直接影响下一帧取背景。
+            regv &= ~0b111101111100000;
+            regv |= regt & 0b111101111100000;  
             OAMADDR = 0;
         }
     }
     // 判断是否在可见扫描线区域（0-239为可见扫描线）
     if (0 <= current_scanline && current_scanline <= 239) {
-        #ifndef TEST_WINDOW
         //这里仅仅是把window_buffer的值设置为调色板的索引
         render_background_one_line();
-        // render_sprites_one_line();
+        render_sprites_one_line();
+        #ifndef TEST_WINDOW
         for (int i = 0;i < width;i++) {
             const auto index = (render_buffer[i] & 3) ? render_buffer[i] : 0;
             window_buffer[current_scanline*width + i] = nes_palette[palette_indexes[index]];
@@ -295,10 +345,9 @@ void PPU::scan_one_line() {
     if (current_scanline == 240) {
         //开启vblank
         is_vblank = true;
+        vblank_triggered = false;
         reg2002 |= D7;
-        if (reg2000 & D7) {
-            Bus::get().get_CPU().trigger_NMI();
-        }
+        trigger_vblank();
     }
 
     //扫描线260的最后要执行的,
@@ -322,17 +371,17 @@ auto PPU::render_background_one_line() -> void {
         memset(render_buffer.data(), 0, 256);
         return;
     }
-    static int aaa = 0;
-    if (aaa == 0) {
-        //输出ram
-        for (int i = 0;i < 30;i++) {
-            for (int j = 0;j < 32;j++) {
-                LOG("%02x ", ppu_bus[i*32+j]);
-            }
-            LOG("\n");
-        }
-        aaa = 1;
-    }
+    // static int aaa = 0;
+    // if (aaa == 0) {
+    //     //输出ram
+    //     for (int i = 0;i < 30;i++) {
+    //         for (int j = 0;j < 32;j++) {
+    //             LOG("%02x ", ppu_bus[i*32+j]);
+    //         }
+    //         LOG("\n");
+    //     }
+    //     aaa = 1;
+    // }
     //有滚动就比较复杂
     //不考虑镜像
     unsigned int col = 0;
@@ -413,6 +462,7 @@ auto PPU::render_sprites_one_line() -> void {
             sprites[sprites_count] = sp_oam[0];
             sprites[sprites_count++].y++; 
             has_sp0 = true;
+            // LOG("SP0: x = %d, y = %d, attr = 0x%02x\n", sprites[0].x, sprites[0].y, sprites[0].attr);
         }
     }
     for (;i < 64 && sprites_count < 8; i++) {
@@ -461,6 +511,7 @@ auto PPU::render_sprites_one_line() -> void {
             //检测sprite 0命中
             if (has_sp0 && (render_buffer[pos] & 3)) {
                 reg2002 |= D6;
+                // LOG("SP0 hit\n");
             }
             //精灵优先级
             if (!(sprites[i].attr & D5)) {

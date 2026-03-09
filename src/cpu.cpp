@@ -84,20 +84,25 @@ void CPU::run1operation() {
         uint16_t high = (uint16_t)Bus::get().cpu_read(0xFFFB) << 8;
         PUSH((uint8_t)(pc >> 8));
         PUSH((uint8_t)(pc & 0xFF));
+        p &= ~B;
         PUSH(p);
         pc = low | high;
         is_NMI = false;
+        SET_FLAG(I, 1);
         Timing::step_cpu_tick(7);
         return;
     } 
-    if (is_IRQ) {  //这里应该有个IRQ屏蔽位?
+    if (is_IRQ && !GET_FLAG(I)) {  //这里应该有个IRQ屏蔽位?
         //如果有NMI中断来
         uint16_t low = Bus::get().cpu_read(0xFFFE);
         uint16_t high = (uint16_t)Bus::get().cpu_read(0xFFFF) << 8;
-        PUSH(pc);
+        PUSH((uint8_t)(pc >> 8));
+        PUSH((uint8_t)(pc & 0xFF));
+        p &= ~B;
         PUSH(p);
         pc = low | high;
         is_IRQ = false;
+        SET_FLAG(I, 1);
         Timing::step_cpu_tick(7);
         return;
     }
@@ -746,10 +751,14 @@ void NOP() {
 }
 
 void BRK() {
-    cpu.op_length = 1;
+    cpu.op_length = 2;
+    cpu.is_branch = true;
+    PUSH((uint8_t)((cpu.pc + 2) >> 8));
+    PUSH((uint8_t)((cpu.pc + 2) & 0xFF));
+    PUSH(cpu.p | B);
     cpu.s = cpu.pc;
     cpu.pc = 0xFFFE;
-    SET_FLAG(B, 1);
+    SET_FLAG(I, 1);
 }
 
 void XXX() {

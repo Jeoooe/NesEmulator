@@ -32,6 +32,7 @@ public:
     void render();
     void render_tile(unsigned int index);
     bool poll_event(SDL_Event *event);
+    bool wait_event(SDL_Event *event);
     inline bool is_running() {
         return running;
     }

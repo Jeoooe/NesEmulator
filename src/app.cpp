@@ -1,17 +1,24 @@
 #include <app.h>
+
 #include <memory>
 #include <unordered_map>
 #include <chrono>
 #include <thread>
-#include <types.h>
-#include <const.h>
-#include <cartridge.h>
+
 #include <bus.h>
+#include <cartridge.h>
 #include <cpu.h>
+#include <const.h>
+#include <controller.h>
 #include <ppu.h>
+#include <types.h>
 #include <timing.h>
 #include <window.h>
-#include <controller.h>
+
+
+#ifdef DISASSEMBLE
+#include "test/check_log.hpp"
+#endif
 
 static constexpr double NTSC_CPU_CLOCK = 1789772.5;
 static constexpr double FRAMES_PER_SECOND = 60.1;
@@ -108,12 +115,50 @@ void Application::start(int argc, char *argv[]) {
     #endif
 
     //主逻辑
+    #ifdef DISASSEMBLE
+
+    Disassembler disa;
+
+    #endif
     
     while (window.is_running()) {
         SDL_Event event;
+        #ifdef DISASSEMBLE
+
+        if (disa.enabled) {
+            (void)window.wait_event(&event);
+            bool step = false;
+            if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) {
+                switch (event.key.key) {
+                case SDLK_E:
+                    disa.enabled = false;
+                    break;
+                case SDLK_L:
+                    disa.list_lines();
+                    break;
+                case SDLK_S:
+                    step = true;
+                    break;
+                }
+            }
+            if (step) {
+                cpu.run1operation();
+                ppu->scan();
+            }
+        } else {
+
+        #endif
+
         while (window.poll_event(&event)) {
             if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) {
                 key_event(&event);
+
+                #ifdef DISASSEMBLE
+                if (event.key.key == SDLK_E) {
+                    //开启关闭
+                    disa.enabled = true;
+                }
+                #endif
             }
         }
         
@@ -125,6 +170,10 @@ void Application::start(int argc, char *argv[]) {
         ppu->render_full_screen(&window);
         #endif
         window.render();
+
+        #ifdef DISASSEMBLE
+        }
+        #endif
     }
 #else 
     FrameTimer timer;

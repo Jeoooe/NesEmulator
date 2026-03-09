@@ -43,6 +43,7 @@ private:
     bool is_rendering();
     uint8_t ppu_ram_read(uint16_t addr);
     void ppu_ram_write(uint16_t addr, uint8_t value);
+    void trigger_vblank();
 
     /// @brief 提供精度为扫描行的渲染
     auto scan_one_line() -> void;
@@ -83,6 +84,7 @@ public:
     static constexpr unsigned int rendering_ticks = 81840;
     static constexpr unsigned int vblank_ticks = 7502;
     static constexpr unsigned int total_frame_ticks = rendering_ticks + vblank_ticks;
+
 private:
     /*
         0x0000 - 0x1FFF: pattern    这里还是ROM范围
@@ -96,6 +98,7 @@ private:
     std::array<uint8_t, 0x1000> ppu_bus;        //专用总线 2kb 调色板单独拿出来
     std::array<uint8_t, 0x20> palette_indexes;  //调色板
     std::array<uint8_t, 0x100> OAM;               //OAM精灵内存, 64个精灵
+    uint8_t reserved[1024];
     //内部寄存器
     uint8_t regw = 0;       //1bit 控制二次写入
     uint8_t regx = 0;       //3bit 控制瓦片内X偏移
@@ -126,6 +129,7 @@ private:
     uint8_t vram_buffer = 0;        //VRAM的缓冲区
 
     bool is_vblank = false;                 //是否处于vblank状态
+    bool vblank_triggered = false;
     //设置为-2时, 标志该帧结束, 并且检测之后会置为-1
     int current_scanline = 0;  // 当前扫描行
 
