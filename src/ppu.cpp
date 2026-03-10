@@ -505,11 +505,13 @@ auto PPU::render_sprites_one_line() -> void {
         const bool is_hflip = sprites[i].attr & D6;
         for (int j = 0;j < 8;j++) {
             auto pixel = pixels[is_hflip ? 7 - j : j];
-            auto pos = sprites[i].x + j;
+            int pos = sprites[i].x + j;
+            if (pos < 0 || pos >= 256) continue;
             //精灵像素透明
             if (!(pixel & 3)) continue;
             //检测sprite 0命中
-            if (has_sp0 && (render_buffer[pos] & 3)) {
+            //是sp0, 有sp0存在, 并且背景和精灵均不是透明
+            if (i == 0 && has_sp0 && (render_buffer[pos] & 3)) {
                 reg2002 |= D6;
                 // LOG("SP0 hit\n");
             }
