@@ -11,7 +11,7 @@ class DebugEmulatorWindow;
 
 class PPU {
 public:
-    PPU() = default;
+    PPU();
     ~PPU() = default;
 
     inline auto &get_window_buffer() {
@@ -22,6 +22,9 @@ public:
     }
     inline auto &get_palette_indexes() {
         return palette_indexes;
+    }
+    inline uint8_t **get_mirror_palette() {
+        return mirror_palette;
     }
     //逻辑部分
     uint8_t cpu_read(uint16_t addr);
@@ -148,6 +151,8 @@ private:
     //设置为-2时, 标志该帧结束, 并且检测之后会置为-1
     int current_scanline = -1;  //当前扫描行
     int cycle = 0;             //当前行的周期数
+
+    uint8_t *mirror_palette[32];    //镜像的调色板
 
     #ifdef TEST_WINDOW
     DebugEmulatorWindow *window;

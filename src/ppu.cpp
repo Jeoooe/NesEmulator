@@ -75,7 +75,15 @@ inline uint16_t ppu_ram_map(uint16_t addr) {
     }
 }
 
-uint8_t PPU::cpu_read(uint16_t addr) {
+PPU::PPU() {
+    for (int i = 0;i < 32;i++) {
+        if (i & 3) mirror_palette[i] = &palette_indexes[i];
+        else mirror_palette[i] = &palette_indexes[0];
+    }
+}
+
+uint8_t PPU::cpu_read(uint16_t addr)
+{
     static uint8_t latch = 0;
     //非vblank状态不进行处理
     // if (is_rendering()) return 0;
@@ -281,9 +289,6 @@ void PPU::ppu_ram_write(uint16_t addr, uint8_t value) {
         } else {
             addr &= 0x0F;
             palette_indexes[addr] = palette_indexes[addr | 0x10] = value;
-            if (addr == 0) {    //直接赋值过去
-                palette_indexes[4] = palette_indexes[8] = palette_indexes[0xC] = value;
-            }
         }
     }
 }
@@ -320,7 +325,10 @@ void PPU::scan() {
         uint8_t attr;
         uint8_t x;
     } sec_oam[8];
-    static uint8_t internal_reg[4] = {0, 0, 0, 0};  //shift寄存器 ? 不完全一样
+    static uint8_t internal_reg[4] = {0, 0, 0, 0};  //内部读取瓦片的寄存器
+    static uint8_t shift_buffer[16];                //移位缓冲区
+    static int shift_switch = 0;                
+    static int write_switch = 0;
     static int sprite_count = 0;    //精灵评估的数量
     static int sprite_entry = 0;    //正在评估第几个精灵
     static bool has_sprite0 = 0;
@@ -411,37 +419,42 @@ void PPU::scan() {
             }
             case 0:
             {
+                //这里要先渲染一个再加载数据
+                if (cycle <= 256) {
+                    for (int i = 0;i < 8;i++) {
+                        //这里要检测精灵
+                        uint16_t pixel = render_buffer[render_pos];
+                        int shift = (regx + shift_switch + i) & 15;
+                        //sp0碰撞
+                        //是sp0, 两者不透明. 
+                        if ((pixel & Sprite0Flag) && (shift_buffer[shift] & 3)) {
+                            reg2002 |= Sprite0Hit;
+                        }
+                        //这里再考虑渲染
+                        if (!(pixel & SpritePixelFlag) || 
+                            ((pixel & SpritePriorityFlag) && (shift_buffer[shift] & 3))
+                        ) {
+                            // 不是精灵
+                            // 或者精灵是透明
+                            // 或者精灵优先级=1, 即在背景后面, 并且背景不是透明
+                            render_buffer[render_pos] = shift_buffer[shift];
+                        }
+                        render_buffer[render_pos] &= 0x1F;  //然后直接清掉所有标志, 给渲染用
+                        render_pos++;
+                    }
+                    shift_switch = (shift_switch + 8) & 15;
+                }
                 //这里也是上一次读取的结束, 加入渲染.
                 const uint8_t attribute_offset = (regv & 0x2) | ((regv & 0x40) >> 4);
                 const uint8_t palette_entry = ((internal_reg[1] >> attribute_offset) & 0x3) << 2;
                 const auto pixels = decode_tile(
                     TileRow{ internal_reg[2], internal_reg[3] }, palette_entry
                 );
-                const int line_col = render_pos & 255;
-                const int line = render_pos >> 8;   //当前行
-                int st = 0, ed = 8;
-                if (line_col == 0) {
-                    st = regx;
-                } else if (256 - line_col < 8) {
-                    ed = 256 - line_col;
+                for (int i = 0;i < 8;i++) {
+                    shift_buffer[write_switch + i] = pixels[i];
                 }
-                for (int i = st;i < ed;i++) {
-                    //这里要检测精灵
-                    uint16_t pixel = render_buffer[render_pos];
-                    //sp0碰撞
-                    //是sp0, 两者不透明. 
-                    if ((pixel & Sprite0Flag) && (pixels[i] & 3)) {
-                        reg2002 |= Sprite0Hit;
-                    }
-                    //这里再考虑渲染
-                    if (!(pixel & SpritePixelFlag) || ((pixel & SpritePriorityFlag) && (pixels[i] & 3))) {
-                        // 不是精灵
-                        // 或者精灵优先级=1, 即在背景后面, 并且背景不是透明
-                        render_buffer[render_pos] = pixels[i];
-                    }
-                    render_buffer[render_pos] &= 0x1F;  //然后直接清掉所有标志, 给渲染用
-                    render_pos++;
-                }
+                write_switch = (write_switch + 8) & 15;
+                
                 //这里进行X增加
                 if ((regv & 0x001F) == 31) {
                     regv &= ~0x001F;

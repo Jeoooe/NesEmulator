@@ -71,10 +71,13 @@ void EmulatorWindow::render() {
         // }
         // SDL_UnlockTexture(gamepad_texture);
         auto &ppu_buffer = Bus::get().get_PPU()->get_render_buffer();
-        auto &palette = Bus::get().get_PPU()->get_palette_indexes();
+        uint8_t **mirror_palette = Bus::get().get_PPU()->get_mirror_palette();
         Uint32 *buffer = (Uint32 *)texture_buffer;
         for (int i = 0;i < width * height;i++) {
-            buffer[i] = nes_palette[palette[ppu_buffer[i] & 0x1F]];
+            // int index = ppu_buffer[i] & 0x1F;
+            // if ((index & 3) == 0) buffer[i] = nes_palette[palette[0]];
+            // else buffer[i] = nes_palette[palette[index]];
+            buffer[i] = nes_palette[*mirror_palette[ppu_buffer[i]]];
             // memcpy(buffer, ppu_buffer.data(), width * height * sizeof(Uint32));
         }
         //包边
