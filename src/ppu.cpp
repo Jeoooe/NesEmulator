@@ -27,6 +27,14 @@
 #define D14 0x4000
 #define D15 0x8000
 
+#define SpriteOverflow D5
+#define Sprite0Hit D6
+#define VblankFlag D7
+
+#define Sprite0Flag D7
+#define SpritePixelFlag D6
+#define SpritePriorityFlag D5
+
 
 inline constexpr uint16_t vram_start = 0x2000; 
 inline constexpr cycle_t ONE_LINE_TICK = 341;
@@ -49,18 +57,6 @@ static const uint32_t nes_palette[64] = {
     0xfff090ff, 0xc8f080ff, 0xa0f0a0ff, 0xa0ffc8ff,
     0xa0fff0ff, 0xa0a0a0ff, 0x000000ff, 0x000000ff
 };
-
-bool PPU::is_frame_end() {
-    if (current_scanline == -2) {
-        current_scanline = -1;
-        return true;
-    }
-    return false;
-}
-
-bool PPU::is_rendering() {
-    return !is_vblank && (reg2001 & (D3 | D4));
-}
 
 //映射自己的显存
 inline uint16_t ppu_ram_map(uint16_t addr) {
@@ -205,10 +201,9 @@ void PPU::cpu_write(uint16_t addr, uint8_t value) {
             }
             //这里需要同步扫描
             //直接调用扫描五次应该就行了, 最多应该也就五行
-            Timing::step_cpu_tick(513); //直接占用513周期?无所谓了, 先这样
-            for (int i = 0;i < 5;i++) {
-                scan();
-            }
+            uint64_t cpu_cycle = Timing::get_current_tick() / 3;
+            Timing::step_cpu_tick(513 + (cpu_cycle & 1)); //直接占用513周期?无所谓了, 先这样
+            scan();
         }
         break;
     }
@@ -286,8 +281,23 @@ void PPU::ppu_ram_write(uint16_t addr, uint8_t value) {
         } else {
             addr &= 0x0F;
             palette_indexes[addr] = palette_indexes[addr | 0x10] = value;
+            if (addr == 0) {    //直接赋值过去
+                palette_indexes[4] = palette_indexes[8] = palette_indexes[0xC] = value;
+            }
         }
     }
+}
+
+bool PPU::is_frame_end() {
+    if (current_scanline == -2) {
+        current_scanline = -1;
+        return true;
+    }
+    return false;
+}
+
+bool PPU::is_rendering() {
+    return !is_vblank && (reg2001 & (D3 | D4));
 }
 
 void PPU::trigger_vblank() {
@@ -299,70 +309,319 @@ void PPU::trigger_vblank() {
 }
 
 void PPU::scan() {
-    static uint64_t next_line_tick = ONE_LINE_TICK;
+    /*
+        内容参见 https://www.nesdev.org/wiki/PPU_rendering
+    */
+
+
+    static struct Sprite {
+        uint8_t y; 
+        uint8_t tile_index;
+        uint8_t attr;
+        uint8_t x;
+    } sec_oam[8];
+    static uint8_t internal_reg[4] = {0, 0, 0, 0};  //shift寄存器 ? 不完全一样
+    static int sprite_count = 0;    //精灵评估的数量
+    static int sprite_entry = 0;    //正在评估第几个精灵
+    static bool has_sprite0 = 0;
+    // static uint8_t sprite_read_buffer = 0;  //精灵评估时的读取值
+    static int render_pos = 0;
+    static uint64_t next_cycle_tick = 0;
+    // -2 不处理 直接给is_frame_end消费, 可能会导致缺几百个周期?
+    if (current_scanline == -2) return;
     auto current_tick = Timing::get_current_tick();
-    if (current_tick >= next_line_tick) {
-        scan_one_line();
-        next_line_tick += ONE_LINE_TICK;
+    for (;current_tick > next_cycle_tick; next_cycle_tick++) {
+        //考虑扫描线是什么
+        if (current_scanline == 241 && cycle == 1) {
+            //触发vblank
+            is_vblank = true;
+            vblank_triggered = false;
+            reg2002 |= D7;
+            trigger_vblank();
+            goto scan_behavior_end;
+        }
+
+        if (current_scanline == -1) { 
+            if (cycle == 1) {
+                //清空vblank sprite0标志 sprite overflow标志
+                is_vblank = false;
+                reg2002 &= ~(D7 | D6 | D5); 
+                render_pos = 0;
+            } 
+            if (!is_rendering()) goto scan_behavior_end;
+
+            if (280 <= cycle && cycle <= 304) {
+                regv &= ~0b111101111100000;
+                regv |= regt & 0b111101111100000;  
+                OAMADDR = 0;
+            }
+            if (cycle >= 321) goto scan_begin;
+            goto scan_behavior_end;
+        }
+
+        if (240 <= current_scanline && current_scanline <= 260 ) {
+            goto scan_behavior_end;
+        }
+
+
+        //没开启渲染的话就只需要考虑vblank 和-1清标志位 ?
+        scan_begin:
+        if (!is_rendering()) {
+            goto scan_behavior_end;
+        }
+
+        if (!(reg2001 & D3)) {
+            //未开启背景渲染 
+            goto scan_sprite;
+        }
+        
+        if ((  1 <= cycle && cycle <= 256) || (321 <= cycle && cycle <= 336)) {
+        // if ((1 <= cycle && cycle <= 256)) {
+            switch (cycle & 0b111) {
+            case 0b001:     //读取名称表
+            {
+                //获取图案表tile地址
+                const uint16_t tile_addr = regv & 0x0FFF;
+                internal_reg[0] = ppu_bus[ppu_ram_map(tile_addr)];
+                break;
+            }
+            case 0b011:     //读取属性表
+            {
+                const uint16_t attribute_addr = 0x03C0 | (regv & 0x0C00) | ((regv >> 4) & 0x38) | ((regv >> 2) & 0x07);
+                internal_reg[1] = ppu_bus[ppu_ram_map(attribute_addr)];
+                // const uint8_t attribute_offset = (regv & 0x2) | ((regv & 0x40) >> 4);
+                // const uint8_t palette_entry = ((attribute >> attribute_offset) & 0x3) << 2;
+                break;
+            }
+            case 0b101:     //图案表低字节
+            {
+                const uint16_t pattern_table = (reg2000 & D4) << 8;
+                const uint16_t index = internal_reg[0];
+                const uint8_t row_in_tile = (regv >> 12) & 0x7;
+                internal_reg[2] = Bus::get().ppu_read(pattern_table | ((index)<<4) | row_in_tile);
+                break;
+            }
+            case 0b111:
+            {
+                const uint16_t pattern_table = (reg2000 & D4) << 8;
+                const uint16_t index = internal_reg[0];
+                const uint8_t row_in_tile = (regv >> 12) & 0x7;
+                internal_reg[3] = Bus::get().ppu_read(pattern_table | (index<<4) | row_in_tile | 8);;
+                break;
+            }
+            case 0:
+            {
+                //这里也是上一次读取的结束, 加入渲染.
+                const uint8_t attribute_offset = (regv & 0x2) | ((regv & 0x40) >> 4);
+                const uint8_t palette_entry = ((internal_reg[1] >> attribute_offset) & 0x3) << 2;
+                const auto pixels = decode_tile(
+                    TileRow{ internal_reg[2], internal_reg[3] }, palette_entry
+                );
+                const int line_col = render_pos & 255;
+                const int line = render_pos >> 8;   //当前行
+                int st = 0, ed = 8;
+                if (line_col == 0) {
+                    st = regx;
+                } else if (256 - line_col < 8) {
+                    ed = 256 - line_col;
+                }
+                for (int i = st;i < ed;i++) {
+                    //这里要检测精灵
+                    uint16_t pixel = render_buffer[render_pos];
+                    //sp0碰撞
+                    //是sp0, 两者不透明. 
+                    if ((pixel & Sprite0Flag) && (pixels[i] & 3)) {
+                        reg2002 |= Sprite0Hit;
+                    }
+                    //这里再考虑渲染
+                    if (!(pixel & SpritePixelFlag) || ((pixel & SpritePriorityFlag) && (pixels[i] & 3))) {
+                        // 不是精灵
+                        // 或者精灵优先级=1, 即在背景后面, 并且背景不是透明
+                        render_buffer[render_pos] = pixels[i];
+                    }
+                    render_buffer[render_pos] &= 0x1F;  //然后直接清掉所有标志, 给渲染用
+                    render_pos++;
+                }
+                //这里进行X增加
+                if ((regv & 0x001F) == 31) {
+                    regv &= ~0x001F;
+                    regv ^= 0x0400;
+                } else {
+                    regv++;
+                }
+            }
+            }   
+        }
+        
+        //这里负责精灵渲染
+        scan_sprite:
+        if (!(reg2001 & D4) || current_scanline == -1) {
+            //未开启精灵渲染
+            goto scan_2_end;
+        }
+
+        //1-64覆写应该没有必要
+        
+        //直接模拟也太难了, 还是直接一次性评估吧
+        if (cycle == 256) {
+            Sprite *oam = (Sprite *)OAM.data();
+            while (sprite_entry < 64) {
+                int diff = current_scanline - oam[sprite_entry].y;
+                int sprite_high = (reg2000 & D5) ? 16 : 8;
+                if (diff >= 0 && diff < sprite_high) {
+                    if (sprite_count < 8) {
+                        sec_oam[sprite_count] = oam[sprite_entry];
+                    }
+                    if (sprite_entry == 0) has_sprite0 = true;
+                    sprite_count++; //这个用作精灵溢出
+                }
+                sprite_entry++;
+            }
+            if (sprite_count >= 8) reg2002 |= SpriteOverflow;
+            goto scan_2_end;
+        }
+
+        if (cycle == 320 && current_scanline < 239) {
+            //这里直接在末尾获取精灵数据了
+            //直接绘制到下一行像素里面
+            bool is_8x16 = reg2000 & D5;
+            for (int i = sprite_count - 1;i >= 0;i--) {
+                int row_in_tile = current_scanline - sec_oam[i].y;
+                if (sec_oam[i].attr & D7) {
+                    //垂直翻转
+                    if (is_8x16) row_in_tile = 15 - row_in_tile;
+                    else row_in_tile = 7 - row_in_tile;
+                }
+                //对于8x8和8x16而言, 区别在选择瓦片
+                uint8_t tile_index = sec_oam[i].tile_index;
+                uint16_t pattern_table = (reg2000 & D3) << 9;
+                if (is_8x16) {
+                    pattern_table = (tile_index & 1) ? 0x1000 : 0;
+                    tile_index &= ~1;
+                    tile_index |= (row_in_tile > 7) ? 1 : 0;
+                    row_in_tile &= 7;
+                }
+                const auto tile = get_tile_pixels(tile_index, pattern_table, row_in_tile);
+                const auto pixels = decode_tile(tile, ((sec_oam[i].attr & 0x3)<<2) | 0x10);
+                const bool is_hflip = sec_oam[i].attr & D6;
+                const uint16_t sp0_flag = (i == 0 && has_sprite0) ? Sprite0Flag : 0;
+                for (int j = 0;j < 8;j++) {
+                    uint16_t pixel = pixels[is_hflip ? 7 - j : j];
+                    int pos = sec_oam[i].x + j;
+                    if (pos < 0 || pos >= 256 || (pixel & 3) == 0) continue;
+                    //检测在背景渲染部分
+                    pixel |= (sec_oam[i].attr & SpritePriorityFlag) | sp0_flag | SpritePixelFlag;
+                    render_buffer[(current_scanline + 1)*width + pos] = pixel;
+                }
+            }
+        }
+
+
+        scan_2_end:
+
+        //337 - 340 不做什么
+        
+        //cycle == 0 不需要额外代码
+        //下面是每行的重置寄存器
+        if (current_scanline >= 240) {
+            goto scan_behavior_end;
+        }
+        if (cycle == 256) {
+            //重置Y
+            if ((regv & 0x7000) != 0x7000) { //fine Y < 7
+                regv += 0x1000;
+            } else {
+                regv &= ~0x7000;
+                int y = (regv & 0x03E0) >> 5;   //coarse_y
+                if (y == 29) {
+                    y = 0;
+                    regv ^= 0x0800;
+                } else if (y == 31) {
+                    y = 0;
+                } else {
+                    y += 1;
+                }
+                regv = (regv & ~0x03E0) | (y << 5);
+            }
+        }
+        if (cycle == 257) {
+            //重置X
+            regv &= ~0b000010000011111;
+            regv |= regt & 0b000010000011111;
+        }
+        
+        scan_behavior_end:
+        cycle++;
+        if (cycle == 341) {
+            cycle = 0;
+            current_scanline++;
+            sprite_entry = sprite_count = 0;
+            has_sprite0 = false;
+            if (current_scanline == 261) {
+                current_scanline = -2;
+                break;
+            }
+        }
+
     }
 }
 
 
 
-void PPU::scan_one_line() {  
-    static int odd_frame = 0;
-    //修复奇数偶数帧的问题?
-    //Pre-render
-    if (current_scanline == -1) {
-        //更新数据  
-        is_vblank = false;
-        /*
-            FIX:这里是极其严重的bug
-            当PPU处于关闭渲染状态时, -1扫描线不会对寄存器进行操作
-        */
-        if (is_rendering()) {
-        // {
-            // 预渲染线开始时, 把滚动目标地址恢复到当前VRAM地址。
-            // 否则CPU在vblank期间写名称表后留下的regv会直接影响下一帧取背景。
-            regv &= ~0b111101111100000;
-            regv |= regt & 0b111101111100000;  
-            OAMADDR = 0;
-        }
-    }
-    // 判断是否在可见扫描线区域（0-239为可见扫描线）
-    if (0 <= current_scanline && current_scanline <= 239) {
-        //这里仅仅是把window_buffer的值设置为调色板的索引
-        render_background_one_line();
-        render_sprites_one_line();
-        #ifndef TEST_WINDOW
-        for (int i = 0;i < width;i++) {
-            const auto index = (render_buffer[i] & 3) ? render_buffer[i] : 0;
-            window_buffer[current_scanline*width + i] = nes_palette[palette_indexes[index]];
-        }
-        #endif
-    }
+// void PPU::scan_one_line() {  
+//     static int odd_frame = 0;
+//     //修复奇数偶数帧的问题?
+//     //Pre-render
+//     if (current_scanline == -1) {
+//         //更新数据  
+//         is_vblank = false;
+//         /*
+//             FIX:这里是极其严重的bug
+//             当PPU处于关闭渲染状态时, -1扫描线不会对寄存器进行操作
+//         */
+//         if (is_rendering()) {
+//         // {
+//             // 预渲染线开始时, 把滚动目标地址恢复到当前VRAM地址。
+//             // 否则CPU在vblank期间写名称表后留下的regv会直接影响下一帧取背景。
+//             regv &= ~0b111101111100000;
+//             regv |= regt & 0b111101111100000;  
+//             OAMADDR = 0;
+//         }
+//     }
+//     // 判断是否在可见扫描线区域（0-239为可见扫描线）
+//     if (0 <= current_scanline && current_scanline <= 239) {
+//         //这里仅仅是把window_buffer的值设置为调色板的索引
+//         render_background_one_line();
+//         render_sprites_one_line();
+//         #ifndef TEST_WINDOW
+//         for (int i = 0;i < width;i++) {
+//             const auto index = (render_buffer[i] & 3) ? (render_buffer[i] & 0xFF) : 0;
+//             window_buffer[current_scanline*width + i] = nes_palette[palette_indexes[index]];
+//         }
+//         #endif
+//     }
 
-    if (current_scanline == 240) {
-        //开启vblank
-        is_vblank = true;
-        vblank_triggered = false;
-        reg2002 |= D7;
-        trigger_vblank();
-    }
+//     if (current_scanline == 240) {
+//         //开启vblank
+//         is_vblank = true;
+//         vblank_triggered = false;
+//         reg2002 |= D7;
+//         trigger_vblank();
+//     }
 
-    //扫描线260的最后要执行的,
-    //也有-1扫描线刚开始会做的
-    if (current_scanline == 260) {
-        reg2002 &= ~(D7 | D6 | D5);  //清空vblank sprite0标志 sprite overflow标志
-        current_scanline = -2;  //-2则为帧结束
-        Timing::set_tick(Timing::get_current_tick() - odd_frame);
-        odd_frame = 1 - odd_frame;
-        return;
-    }
+//     //扫描线260的最后要执行的,
+//     //也有-1扫描线刚开始会做的
+//     if (current_scanline == 260) {
+//         reg2002 &= ~(D7 | D6 | D5);  //清空vblank sprite0标志 sprite overflow标志
+//         current_scanline = -2;  //-2则为帧结束
+//         Timing::set_tick(Timing::get_current_tick() - odd_frame);
+//         odd_frame = 1 - odd_frame;
+//         return;
+//     }
     
-    // 更新扫描线计数
-    current_scanline++;
-}
+//     // 更新扫描线计数
+//     current_scanline++;
+// }
 
 auto PPU::render_background_one_line() -> void {
     if (!(reg2001 & D3)) {
@@ -371,17 +630,6 @@ auto PPU::render_background_one_line() -> void {
         memset(render_buffer.data(), 0, 256);
         return;
     }
-    // static int aaa = 0;
-    // if (aaa == 0) {
-    //     //输出ram
-    //     for (int i = 0;i < 30;i++) {
-    //         for (int j = 0;j < 32;j++) {
-    //             LOG("%02x ", ppu_bus[i*32+j]);
-    //         }
-    //         LOG("\n");
-    //     }
-    //     aaa = 1;
-    // }
     //有滚动就比较复杂
     //不考虑镜像
     unsigned int col = 0;
@@ -510,18 +758,18 @@ auto PPU::render_sprites_one_line() -> void {
             //精灵像素透明
             if (!(pixel & 3)) continue;
             //检测sprite 0命中
-            //是sp0, 有sp0存在, 并且背景和精灵均不是透明
-            if (i == 0 && has_sp0 && (render_buffer[pos] & 3)) {
+            //是sp0, 有sp0存在, 该位置是背景像素, 并且背景和精灵均不是透明
+            if (i == 0 && has_sp0 && !(render_buffer[pos] & D15) && (render_buffer[pos] & 3)) {
                 reg2002 |= D6;
                 // LOG("SP0 hit\n");
             }
             //精灵优先级
             if (!(sprites[i].attr & D5)) {
                 //优先级为0, 精灵在背景前
-                render_buffer[pos] = pixel;
+                render_buffer[pos] = pixel | D15;
             } else if (!(render_buffer[pos] & 3)) {
                 //背景是透明色
-                render_buffer[pos] = pixel;
+                render_buffer[pos] = pixel | D15;
             }
         }
     }

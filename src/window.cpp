@@ -4,6 +4,25 @@
 #include <ppu.h>
 #include <const.h>
 
+static const uint32_t nes_palette[64] = {
+    0x7f7f7fff, 0x2000b0ff, 0x2800b8ff, 0x6010a0ff,
+    0x982078ff, 0xb01030ff, 0xa03000ff, 0x784000ff,
+    0x485800ff, 0x386800ff, 0x386c00ff, 0x306040ff,
+    0x305080ff, 0x000000ff, 0x000000ff, 0x000000ff,
+    0xbcbcbcff, 0x4060f8ff, 0x4040ffff, 0x9040f0ff,
+    0xd840c0ff, 0xd84060ff, 0xe05000ff, 0xc07000ff,
+    0x888800ff, 0x50a000ff, 0x48a810ff, 0x48a068ff,
+    0x4090c0ff, 0x000000ff, 0x000000ff, 0x000000ff,
+    0xffffffff, 0x60a0ffff, 0x5080ffff, 0xa070ffff,
+    0xf060ffff, 0xff60b0ff, 0xff7830ff, 0xffa000ff,
+    0xe8d020ff, 0x98e800ff, 0x70f040ff, 0x70e090ff,
+    0x60d0e0ff, 0x606060ff, 0x000000ff, 0x000000ff,
+    0xffffffff, 0x90d0ffff, 0xa0b8ffff, 0xc0b0ffff,
+    0xe0b0ffff, 0xffb8e8ff, 0xffc8b8ff, 0xffd8a0ff,
+    0xfff090ff, 0xc8f080ff, 0xa0f0a0ff, 0xa0ffc8ff,
+    0xa0fff0ff, 0xa0a0a0ff, 0x000000ff, 0x000000ff
+};
+
 static constexpr double FRAME_INTERVAL_MS = 1000.0 / 60.1;  
 // static constexpr double FRAME_INTERVAL_MS = 500.0;  
 
@@ -51,9 +70,13 @@ void EmulatorWindow::render() {
         //     }
         // }
         // SDL_UnlockTexture(gamepad_texture);
-        auto &ppu_buffer = Bus::get().get_PPU()->get_window_buffer();
+        auto &ppu_buffer = Bus::get().get_PPU()->get_render_buffer();
+        auto &palette = Bus::get().get_PPU()->get_palette_indexes();
         Uint32 *buffer = (Uint32 *)texture_buffer;
-        memcpy(buffer, ppu_buffer.data(), width * height * sizeof(Uint32));
+        for (int i = 0;i < width * height;i++) {
+            buffer[i] = nes_palette[palette[ppu_buffer[i] & 0x1F]];
+            // memcpy(buffer, ppu_buffer.data(), width * height * sizeof(Uint32));
+        }
         //包边
         // const auto detail = SDL_PixelFormatDetails(SDL_PIXELFORMAT_RGBA8888);
         // SDL_MapRGBA(&detail, nullptr, 0xFF, 0, 0, 0xFF);

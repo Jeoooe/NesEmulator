@@ -17,6 +17,12 @@ public:
     inline auto &get_window_buffer() {
         return window_buffer;
     }
+    inline auto &get_render_buffer() {
+        return render_buffer;
+    }
+    inline auto &get_palette_indexes() {
+        return palette_indexes;
+    }
     //逻辑部分
     uint8_t cpu_read(uint16_t addr);
     void cpu_write(uint16_t addr, uint8_t value);
@@ -79,6 +85,10 @@ private:
     /// @param line 行
     auto render_background_one_line() -> void;
 
+    /*
+        重构部分
+    */
+
     //下面是变量
 public:
     static constexpr unsigned int rendering_ticks = 81840;
@@ -93,12 +103,17 @@ private:
         0x3F00 - 0x3F1F: Palette RAM index 调色板
         0x3F20 - 0x3FFF: Mirrors of 0x3F00 - 0x3F1F
     */
-    std::array<uint8_t, width> render_buffer; //渲染缓冲区, 存储调色板索引
+    
+    // bit15表示 背景0/精灵1 像素
+    // std::array<uint16_t, width> render_buffer; //渲染缓冲区, 存储调色板索引
+
+    // abcx xxxx
+    // D7 = sp0, D6 = is_sprite, D5 = prio
+    std::array<uint8_t, width * height + 256> render_buffer; //渲染缓冲区, 存储调色板索引. 给256缓冲,防止越界
     std::array<uint32_t, width * height>  window_buffer; //屏幕像素的缓冲区, 存储最终的颜色
     std::array<uint8_t, 0x1000> ppu_bus;        //专用总线 2kb 调色板单独拿出来
     std::array<uint8_t, 0x20> palette_indexes;  //调色板
     std::array<uint8_t, 0x100> OAM;               //OAM精灵内存, 64个精灵
-    uint8_t reserved[1024];
     //内部寄存器
     uint8_t regw = 0;       //1bit 控制二次写入
     uint8_t regx = 0;       //3bit 控制瓦片内X偏移
@@ -131,7 +146,8 @@ private:
     bool is_vblank = false;                 //是否处于vblank状态
     bool vblank_triggered = false;
     //设置为-2时, 标志该帧结束, 并且检测之后会置为-1
-    int current_scanline = 0;  // 当前扫描行
+    int current_scanline = -1;  //当前扫描行
+    int cycle = 0;             //当前行的周期数
 
     #ifdef TEST_WINDOW
     DebugEmulatorWindow *window;
