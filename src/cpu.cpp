@@ -92,8 +92,8 @@ void CPU::run1operation() {
         Timing::step_cpu_tick(7);
         return;
     } 
-    if (is_IRQ && !GET_FLAG(I)) {  //这里应该有个IRQ屏蔽位?
-        //如果有NMI中断来
+    if ((is_IRQ && !GET_FLAG(I)) || pc == 0xFFFE) {  //这里应该有个IRQ屏蔽位?
+        //如果有NMI中断来, 或者程序主动触发BRK
         uint16_t low = Bus::get().cpu_read(0xFFFE);
         uint16_t high = (uint16_t)Bus::get().cpu_read(0xFFFF) << 8;
         PUSH((uint8_t)(pc >> 8));
@@ -522,9 +522,9 @@ void SBC() {
         SET_FLAG(V, 0);
     }
     #else
-    uint8_t c = (cpu.p & C) ? 0 : 1;    //这里是要取反的
+    uint8_t c = ~cpu.p & C;    //这里是要取反的
     uint16_t result = (uint16_t)cpu.a - (uint16_t)m - (uint16_t)c;
-    SET_FLAG(C, cpu.a >= m - c);
+    SET_FLAG(C, cpu.a >= m + c);
     SET_FLAG(V, (cpu.a ^ m) & (cpu.a ^ (uint8_t)result) & 0x80);
     cpu.a = (uint8_t)result;
     SET_FLAG(Z, cpu.a == 0);
@@ -756,7 +756,6 @@ void BRK() {
     PUSH((uint8_t)((cpu.pc + 2) >> 8));
     PUSH((uint8_t)((cpu.pc + 2) & 0xFF));
     PUSH(cpu.p | B);
-    cpu.s = cpu.pc;
     cpu.pc = 0xFFFE;
     SET_FLAG(I, 1);
 }
