@@ -63,7 +63,7 @@ inline uint16_t ppu_ram_map(uint16_t addr) {
     const auto &cart = Bus::get().get_cart();
     const uint16_t table = (addr >> 10) & 0x3;
     const uint16_t offset = addr & 0x03FF;
-    const int mirroring = cart ? cart->mirroring : 0;
+    const int mirroring = cart->mirroring;
 
     switch (mirroring) {
     case 1: // vertical: [A, B, A, B]
@@ -257,8 +257,9 @@ void PPU::ppu_ram_write(uint16_t addr, uint8_t value) {
     if (addr < 0x2000) {
         // return; //ROM应该不可写
         // FIX: 考虑到有CHR_RAM这种行为
-        if (Bus::get().get_cart()->use_chr_ram) {
-            Bus::get().ppu_write(addr, value);
+        auto &bus = Bus::get();
+        if (bus.get_cart()->use_chr_ram) {
+            bus.ppu_write(addr, value);
         }
         return;
     }
@@ -379,10 +380,10 @@ void PPU::scan() {
             goto scan_behavior_end;
         }
 
-        if (!(reg2001 & D3)) {
-            //未开启背景渲染 
-            goto scan_sprite;
-        }
+        // if (!(reg2001 & D3)) {
+        //     //未开启背景渲染 
+        //     goto scan_sprite;
+        // }
         
         if ((  1 <= cycle && cycle <= 256) || (321 <= cycle && cycle <= 336)) {
         // if ((1 <= cycle && cycle <= 256)) {
@@ -445,6 +446,8 @@ void PPU::scan() {
                     }
                     shift_switch = (shift_switch + 8) & 15;
                 }
+                //渲染开启使能, 未开启时将像素变为0, 即变为透明
+                const uint8_t render_enable = (reg2001 & D3) >> 3;
                 //这里也是上一次读取的结束, 加入渲染.
                 const uint8_t attribute_offset = (regv & 0x2) | ((regv & 0x40) >> 4);
                 const uint8_t palette_entry = ((internal_reg[1] >> attribute_offset) & 0x3) << 2;
@@ -452,7 +455,7 @@ void PPU::scan() {
                     TileRow{ internal_reg[2], internal_reg[3] }, palette_entry
                 );
                 for (int i = 0;i < 8;i++) {
-                    shift_buffer[write_switch + i] = pixels[i];
+                    shift_buffer[write_switch + i] = pixels[i] * render_enable;
                 }
                 write_switch = (write_switch + 8) & 15;
                 
@@ -468,7 +471,6 @@ void PPU::scan() {
         }
         
         //这里负责精灵渲染
-        scan_sprite:
         if (!(reg2001 & D4) || current_scanline == -1) {
             //未开启精灵渲染
             goto scan_2_end;

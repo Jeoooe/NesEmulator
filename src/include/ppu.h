@@ -36,6 +36,10 @@ public:
     /// @return 该帧是否结束
     bool is_frame_end();
 
+    inline bool render_enabled() {
+        return (reg2001 & 24);
+    }
+
     #ifdef TEST_WINDOW
     void set_window(DebugEmulatorWindow* wind) {
         window = wind;
