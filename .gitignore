@@ -8,3 +8,4 @@ nestest.log.txt
 nestest_disassemble.txt
 test_roms
 callgrind*
+windows-toolchain

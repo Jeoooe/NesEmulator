@@ -25,6 +25,29 @@
                 "CMAKE_BUILD_TYPE": "Debug",
                 "ANALYSIS": "ON"
             }
+        },
+        {
+            "name": "Release",
+            "displayName": "Release",
+            "description": "gcc, g++",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "/usr/bin/gcc",
+                "CMAKE_CXX_COMPILER": "/usr/bin/g++",
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "windows",
+            "displayName": "Windows",
+            "description": "交叉编译Windows平台模拟器",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/windows.cmake"
+            }
         }
 ]
 }
