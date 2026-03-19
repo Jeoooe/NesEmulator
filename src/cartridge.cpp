@@ -33,9 +33,10 @@ int get_mirroring(Nes_header *header) {
 shared_ptr<Cartridge> load_nes_file(const char *filename) {
     std::ifstream file;
     file.open(filename, std::ios::in);
+    printf("Open file: %s\n", filename);
     if (!file.is_open()) {
         //读取错误
-        LOG("Error file");
+        printf("Cannot open file: %s\n", filename);
         return nullptr;
     }
     Nes_header header;
