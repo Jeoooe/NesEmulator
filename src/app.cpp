@@ -20,16 +20,10 @@
 #include "test/check_log.hpp"
 #endif
 
-static constexpr double NTSC_CPU_CLOCK = 1789772.5;
-static constexpr double FRAMES_PER_SECOND = 60.1;
-static constexpr int CYCLES_PER_FRAME = static_cast<int>(NTSC_CPU_CLOCK / FRAMES_PER_SECOND);
-static constexpr int TICKS_PER_FRAME = CYCLES_PER_FRAME * 3;
-
-
 class FrameTimer {
 public:
     // 60.1 fps = 1000/60.1 ≈ 16.6389ms 每帧
-    static constexpr double FRAME_INTERVAL_MS = 1000.0 / 60.1;
+    static constexpr double FRAME_INTERVAL_MS = 1000.0 / 60.0988;
     
     FrameTimer() : next_frame(std::chrono::steady_clock::now()) {}
     
@@ -120,7 +114,7 @@ void Application::start(int argc, char *argv[]) {
     Disassembler disa;
 
     #endif
-    
+    FrameTimer timer;
     while (window.is_running()) {
         SDL_Event event;
         #ifdef DISASSEMBLE
@@ -170,6 +164,8 @@ void Application::start(int argc, char *argv[]) {
         ppu->render_full_screen(&window);
         #endif
         window.render();
+        //这里控制帧率为60.1
+        timer.wait_for_next_frame();
 
         #ifdef DISASSEMBLE
         }

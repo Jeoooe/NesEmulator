@@ -3,6 +3,7 @@
 #include <bus.h>
 #include <ppu.h>
 #include <const.h>
+#include <log.h>
 
 static const uint32_t nes_palette[64] = {
     0x7f7f7fff, 0x2000b0ff, 0x2800b8ff, 0x6010a0ff,
@@ -23,7 +24,6 @@ static const uint32_t nes_palette[64] = {
     0xa0fff0ff, 0xa0a0a0ff, 0x000000ff, 0x000000ff
 };
 
-static constexpr double FRAME_INTERVAL_MS = 1000.0 / 60.1;  
 // static constexpr double FRAME_INTERVAL_MS = 500.0;  
 
 EmulatorWindow::EmulatorWindow() {
@@ -96,9 +96,6 @@ void EmulatorWindow::render() {
     SDL_RenderClear(renderer);
     SDL_RenderTexture(renderer, gamepad_texture, nullptr, nullptr);
     SDL_RenderPresent(renderer);
-
-    //这里还要帧率问题
-    SDL_Delay(FRAME_INTERVAL_MS);
     // SDL_Delay(100);
 }
 

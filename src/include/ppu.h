@@ -148,9 +148,9 @@ private:
 
     bool is_vblank = false;                 //是否处于vblank状态
     bool vblank_triggered = false;
-    //设置为-2时, 标志该帧结束, 并且检测之后会置为-1
     int current_scanline = -1;  //当前扫描行
     int cycle = 0;             //当前行的周期数
+    bool frame_ended = false;
 
     uint8_t *mirror_palette[32];    //镜像的调色板
 

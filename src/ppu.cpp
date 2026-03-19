@@ -294,8 +294,8 @@ void PPU::ppu_ram_write(uint16_t addr, uint8_t value) {
 }
 
 bool PPU::is_frame_end() {
-    if (current_scanline == -2) {
-        current_scanline = -1;
+    if (frame_ended) {
+        frame_ended = false;
         return true;
     }
     return false;
@@ -346,6 +346,7 @@ void PPU::scan() {
             vblank_triggered = false;
             reg2002 |= D7;
             trigger_vblank();
+            frame_ended = true; //在vblank的时候设置帧结束, 然后渲染
             goto scan_behavior_end;
         }
 
@@ -571,7 +572,7 @@ void PPU::scan() {
             sprite_entry = sprite_count = 0;
             has_sprite0 = false;
             if (current_scanline == 261) {
-                current_scanline = -2;
+                current_scanline = -1;
                 break;
             }
         }
