@@ -45,6 +45,6 @@ public:
     uint8_t cpu_read(uint16_t addr);
     void ppu_write(uint16_t addr, uint8_t value);
     uint8_t ppu_read(uint16_t addr);
-    void load_cart(std::shared_ptr<Cartridge>&& cartridge);
+    int load_cart(const char *filename);
 };
 

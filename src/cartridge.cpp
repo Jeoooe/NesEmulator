@@ -30,15 +30,7 @@ int get_mirroring(Nes_header *header) {
 }
 
 
-shared_ptr<Cartridge> load_nes_file(const char *filename) {
-    std::ifstream file;
-    file.open(filename, std::ios::in);
-    printf("Open file: %s\n", filename);
-    if (!file.is_open()) {
-        //读取错误
-        printf("Cannot open file: %s\n", filename);
-        return nullptr;
-    }
+shared_ptr<Cartridge> load_nes_file(std::ifstream &file) {
     Nes_header header;
     file.read((char *)&header, sizeof(Nes_header));
     //判断文件头magic
@@ -61,8 +53,8 @@ shared_ptr<Cartridge> load_nes_file(const char *filename) {
         cart->use_chr_ram = true;
     }
     cart->prg_ram_size = header.PRG_ram ? header.PRG_ram * 8192 : 8192;
-    LOG("PRG ROM: %lx bytes\n"
-        "CHR ROM: %lx bytes\n", cart->prg_rom_size, cart->chr_rom_size);
+    LOG("PRG ROM: %0xlx bytes\n"
+        "CHR ROM: %0xlx bytes\n", cart->prg_rom_size, cart->chr_rom_size);
 
     cart->is_nes2 = (header.flag7 & 0b1100) == 0b1000;
     cart->mapper = ((header.flag6 & 0xF0) >> 4) | (header.flag7 & 0xF0);
@@ -72,13 +64,5 @@ shared_ptr<Cartridge> load_nes_file(const char *filename) {
     assert(cart->prg_rom_size);
     assert(cart->chr_rom_size);
 
-    cart->prg_rom.resize(cart->prg_rom_size);
-    cart->chr_rom.resize(cart->chr_rom_size);
-
-    //读取游戏文件
-    
-    file.read((char *)cart->prg_rom.data(), cart->prg_rom_size);
-    file.read((char *)cart->chr_rom.data(), cart->chr_rom_size);
-    file.close();
     return cart;
 }

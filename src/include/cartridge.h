@@ -20,4 +20,4 @@ public:
     bool use_chr_ram;   //是否使用chr-ram
 };
 
-std::shared_ptr<Cartridge> load_nes_file(const char *filename);
+std::shared_ptr<Cartridge> load_nes_file(std::ifstream &file);

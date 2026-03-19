@@ -11,14 +11,15 @@ class Mapper {
 public:    
     Mapper() = default;
     virtual ~Mapper() = default;
-    virtual uint16_t map_read(uint16_t addr) = 0;
-    virtual uint16_t map_write(uint16_t addr) = 0;
     virtual uint8_t cpu_map_read(uint16_t addr) = 0;
     virtual void    cpu_map_write(uint16_t addr, uint8_t value) = 0;
 
     //addr <= 0x2000
     virtual uint8_t ppu_map_read(uint16_t addr) = 0;
     virtual void ppu_map_write(uint16_t addr, uint8_t value) = 0;
+
+    virtual int load_rom(std::ifstream &file) = 0;
+    virtual void load_cart(std::shared_ptr<Cartridge> _cart) = 0;
 protected:
     std::shared_ptr<Cartridge> cart;
 };
