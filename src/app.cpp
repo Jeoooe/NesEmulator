@@ -84,17 +84,14 @@ void Application::start(int argc, char *argv[]) {
     if (argc < 2) {
         throw std::invalid_argument("Need at least 1 argument");
     }
-    auto cart = load_nes_file(argv[1]);
-
-    if (!cart) {
-        exit(-1);
-    }
 
     auto &bus = Bus::get();
     auto &cpu = bus.get_CPU();
     auto &ppu = Bus::get().get_PPU();  
 
-    bus.load_cart(std::move(cart));
+    if (bus.load_cart(argv[1]) == -1) {
+        throw std::runtime_error("Fail to load this file");
+    }
 
     //CPU初始化
     cpu.reset();
@@ -164,6 +161,7 @@ void Application::start(int argc, char *argv[]) {
         ppu->render_full_screen(&window);
         #endif
         window.render();
+        // window.audio_update();
         //这里控制帧率为60.1
         timer.wait_for_next_frame();
 

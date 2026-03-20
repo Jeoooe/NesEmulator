@@ -1,6 +1,7 @@
 #include <cartridge.h>
 #include <stdint.h>
 #include <fstream>
+#include <iostream>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -35,8 +36,8 @@ shared_ptr<Cartridge> load_nes_file(std::ifstream &file) {
     file.read((char *)&header, sizeof(Nes_header));
     //判断文件头magic
     if (strncmp(header.magic, "NES\x1A", 4) != 0) {
-        fputs("It is not a nes rom", stderr);
-        exit(1);
+        std::cerr << "It is not a Nes rom file" << std::endl;
+        return nullptr;
     }
 
     //正确nes rom文件
