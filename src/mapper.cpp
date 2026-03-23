@@ -63,7 +63,8 @@ public:
     };
     virtual void cpu_map_write(uint16_t addr, uint8_t value) override {
         if (addr < 0xC000) return;
-        prg_rom[0] = cart->prg_rom.data() + (ptrdiff_t)(value%prg_count_16kb)*16384;
+        value &= 0xF;
+        prg_rom[0] = cart->prg_rom.data() + (value%prg_count_16kb)*16384;
     }
 
     virtual uint8_t ppu_map_read(uint16_t addr) override {
