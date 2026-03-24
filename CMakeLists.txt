@@ -27,6 +27,7 @@ src/mapper.cpp
 src/timing.cpp
 src/window.cpp
 src/controller.cpp
+src/apu.cpp
 )
 
 set(headers 
@@ -41,8 +42,10 @@ src/include/types.h
 
 find_package(SDL3 REQUIRED CONFIG)
 find_package(SDL3 REQUIRED CONFIG COMPONENTS SDL3-static)
+# find_library(SDL3_Win 
+#     NAMES SDL3-static.lib PATHS /usr/x86_64-w64-mingw32/lib/SDL REQUIRED)
 find_library(SDL3_Win 
-    NAMES libSDL3.dll.a PATHS /usr/x86_64-w64-mingw32/lib/SDL REQUIRED)
+      NAMES libSDL3.dll.a PATHS ./windows-toolchain/ REQUIRED)
 message("SDL3_Win: ${SDL3_Win}")
 
 add_executable(${PROJECT_NAME})
@@ -65,6 +68,7 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
             INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/windows-toolchain/include"
         )
         target_link_libraries(${PROJECT_NAME} PRIVATE SDL3_Win_Lib)
+        target_link_options(${PROJECT_NAME} PRIVATE "-static")
     endif() 
 endif()
 

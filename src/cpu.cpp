@@ -122,6 +122,12 @@ void CPU::trigger_NMI() {
     this->is_NMI = true;
 }
 
+void CPU::trigger_IRQ() {
+    if (!GET_FLAG(I)) {
+        this->is_IRQ = true;
+    }
+}
+
 /*
     下面是指令集
 */

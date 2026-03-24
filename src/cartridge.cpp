@@ -33,10 +33,14 @@ int get_mirroring(Nes_header *header) {
 
 shared_ptr<Cartridge> load_nes_file(std::ifstream &file) {
     Nes_header header;
+    memset(&header, 0, sizeof(Nes_header));
     file.read((char *)&header, sizeof(Nes_header));
     //判断文件头magic
     if (strncmp(header.magic, "NES\x1A", 4) != 0) {
         std::cerr << "It is not a Nes rom file" << std::endl;
+        std::cerr << "Magic: " << int(header.magic[0]) << int(header.magic[1]) << int(header.magic[2]) << int(header.magic[3]) << std::endl;
+        std::cerr << "PRG ROM size: " << (int)header.PRG_rom << " * 16KB" << std::endl;
+        std::cerr << "CHR ROM size: " << (int)header.CHR_rom << " * 8KB" << std::endl;  
         return nullptr;
     }
 
@@ -54,8 +58,8 @@ shared_ptr<Cartridge> load_nes_file(std::ifstream &file) {
         cart->use_chr_ram = true;
     }
     cart->prg_ram_size = header.PRG_ram ? header.PRG_ram * 8192 : 8192;
-    LOG("PRG ROM: %0xlx bytes\n"
-        "CHR ROM: %0xlx bytes\n", cart->prg_rom_size, cart->chr_rom_size);
+    LOG("PRG ROM: 0x%lx bytes\n"
+        "CHR ROM: 0x%lx bytes\n", cart->prg_rom_size, cart->chr_rom_size);
 
     cart->is_nes2 = (header.flag7 & 0b1100) == 0b1000;
     cart->mapper = ((header.flag6 & 0xF0) >> 4) | (header.flag7 & 0xF0);

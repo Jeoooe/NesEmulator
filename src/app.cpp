@@ -5,6 +5,7 @@
 #include <chrono>
 #include <thread>
 
+#include <apu.h>
 #include <bus.h>
 #include <cartridge.h>
 #include <cpu.h>
@@ -23,7 +24,7 @@
 class FrameTimer {
 public:
     // 60.1 fps = 1000/60.1 ≈ 16.6389ms 每帧
-    static constexpr double FRAME_INTERVAL_MS = 1000.0 / 60.0988;
+    static constexpr double FRAME_INTERVAL_MS = 1000.0 / FrameRate;
     
     FrameTimer() : next_frame(std::chrono::steady_clock::now()) {}
     
@@ -87,7 +88,8 @@ void Application::start(int argc, char *argv[]) {
 
     auto &bus = Bus::get();
     auto &cpu = bus.get_CPU();
-    auto &ppu = Bus::get().get_PPU();  
+    auto &ppu = bus.get_PPU();  
+    auto &apu = bus.get_APU();
 
     if (bus.load_cart(argv[1]) == -1) {
         throw std::runtime_error("Fail to load this file");
@@ -156,12 +158,12 @@ void Application::start(int argc, char *argv[]) {
         while (!ppu->is_frame_end()) {
             cpu.run1operation();
             ppu->scan();
+            apu->run();
         }
         #ifdef TEST_WINDOW
         ppu->render_full_screen(&window);
         #endif
         window.render();
-        // window.audio_update();
         //这里控制帧率为60.1
         timer.wait_for_next_frame();
 

@@ -13,6 +13,7 @@ public:
     void reset();       //CPU重置或启动
     void run1operation();   //运行一个周期
     void trigger_NMI();     //触发NMI中断
+    void trigger_IRQ();     //触发IRQ中断
     // void trigger_DMA();     //触发DMA数据传输,需要占用512周期
 
 public:

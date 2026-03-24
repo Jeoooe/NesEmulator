@@ -1,9 +1,15 @@
 #include <window.h>
+
+#include <algorithm>
+#include <chrono>
 #include <vector>
+
+#include <apu.h>
 #include <bus.h>
 #include <ppu.h>
 #include <const.h>
 #include <log.h>
+#include <timing.h>
 
 static const uint32_t nes_palette[64] = {
     0x7f7f7fff, 0x2000b0ff, 0x2800b8ff, 0x6010a0ff,
@@ -28,7 +34,6 @@ static const uint32_t nes_palette[64] = {
 
 /* 音频相关常量 */
 static constexpr int NES_CHANNELS = 1;
-static constexpr int NES_AUDIO_FRQ = 44100;
 
 EmulatorWindow::EmulatorWindow() {
     SDL_SetLogPriorities(SDL_LOG_PRIORITY_VERBOSE);
@@ -40,7 +45,7 @@ EmulatorWindow::EmulatorWindow() {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         throw std::runtime_error("SDL failed");
     }
-    window = SDL_CreateWindow("Nes", width, height, 0);
+    window = SDL_CreateWindow("Nes",800, 600, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window) {
         SDL_Log("Could not create a window: %s", SDL_GetError());
         throw std::runtime_error("SDL failed");
@@ -50,6 +55,11 @@ EmulatorWindow::EmulatorWindow() {
         SDL_Log("Create renderer failed: %s", SDL_GetError());
         throw std::runtime_error("SDL failed");
     }
+    if (!SDL_SetRenderLogicalPresentation(renderer, width, height, SDL_LOGICAL_PRESENTATION_LETTERBOX)) {
+        SDL_Log("设置逻辑分辨率失败: %s", SDL_GetError());
+        throw std::runtime_error("SDL failed");
+    }
+    SDL_SetWindowAspectRatio(window, 256.0f / 240.0f, 256.0f / 240.0f);
     // surface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_RGBA8888);
     gamepad_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, width, height);
 
@@ -58,7 +68,7 @@ EmulatorWindow::EmulatorWindow() {
     SDL_zero(spec);
     spec.channels = NES_CHANNELS;
     spec.format = SDL_AUDIO_F32;
-    spec.freq = NES_AUDIO_FRQ;
+    spec.freq = SampleRate;
     audio_stream = SDL_OpenAudioDeviceStream(
         SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
         &spec,
@@ -69,9 +79,11 @@ EmulatorWindow::EmulatorWindow() {
         throw std::runtime_error("SDL failed");
     }
     SDL_ResumeAudioStreamDevice(audio_stream);
+    start_audio_thread();
 }
 
 EmulatorWindow::~EmulatorWindow() {
+    stop_audio_thread();
     SDL_DestroyTexture(gamepad_texture);
     // SDL_DestroySurface(surface);
     SDL_DestroyAudioStream(audio_stream);
@@ -109,50 +121,89 @@ void EmulatorWindow::render() {
     // 转换为纹理并渲染
     // SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
 
-    SDL_RenderClear(renderer);
+    // SDL_RenderClear(renderer);
     SDL_RenderTexture(renderer, gamepad_texture, nullptr, nullptr);
     SDL_RenderPresent(renderer);
     // SDL_Delay(100);
 }
 
-void EmulatorWindow::audio_update() {
-    static float phase = 0.0f;               // 当前相位 (0.0 到 1.0)
-    static float phase_increment = 440.0f / 44100.0f; // 每样本相位增量 (440Hz A音)
-    static float volume = 0.25f;              // 音量，小一点防止破音
+/*
+    这里是音频处理
+*/
+struct SquareWave {
+    float frequency = 0; // 频率，单位为赫兹
+    float volume = 0;    // 音量，范围从0.0到15.0
+    float duty_cycle = 0; // 占空比，范围从0.0到1.0
+    float phase = 0;     // 当前相位，范围从0.0到1.0
     
-    int queued_bytes = SDL_GetAudioStreamQueued(audio_stream);
-    constexpr float bytes_per_second = NES_AUDIO_FRQ * NES_CHANNELS * sizeof(float);
-    float queued_seconds = queued_bytes / bytes_per_second;
-    if (queued_seconds < 0.1f) {
-        int target_bytes = static_cast<int>(0.2f * bytes_per_second);
-        int bytes_to_generate = target_bytes - queued_bytes;
+    float generate_sample() {
+        // 根据当前相位和占空比生成方波样本
+        float sample = (phase < duty_cycle) ? volume : -volume;
         
-        // 转换成样本数，并确保不超过我们每帧能处理的上限
-        int samples_to_generate = bytes_to_generate / sizeof(float);
-        samples_to_generate = std::min(samples_to_generate, samples_per_frame);
+        // 更新相位，让它为下一个样本做准备
+        phase += frequency / SampleRate; // 每个样本的相位增量
+        if (phase >= 1.0f) {
+            phase -= 1.0f; // 确保相位始终在0到1之间循环
+        }
+        
+        return sample;
+    }
+};
 
-        if (samples_to_generate > 0) {
-            // 4. 开始烧水！生成方波样本
-            for (int i = 0; i < samples_to_generate; i++) {
-                // 方波的核心算法：相位小于0.5时输出正电压，否则输出负电压
-                // 这就是产生方波"嘟嘟"声的秘密
-                audio_buffer[i] = (phase < 0.5f) ? volume : -volume;
-                
-                // 更新相位，让它为下一个样本做准备
-                phase += phase_increment;
-                
-                // 确保相位始终在0到1之间循环
-                if (phase >= 1.0f) {
-                    phase -= 1.0f;
-                }
-            }
+void EmulatorWindow::audio_update() {
+    // 线程定期调用该函数维护音频队列水位。
 
-            // 5. 把烧好的水（音频数据）灌入热水器的水箱
-            //    SDL_PutAudioStreamData 会把数据复制走，所以我们的audio_buffer可以重复使用
-            SDL_PutAudioStreamData(audio_stream, audio_buffer, samples_to_generate * sizeof(float));
+    constexpr int low_samples = 512;
+    constexpr int target_samples = 1024;
+    constexpr int high_samples = 2048;
+    // constexpr int chunk_samples = 256;
+    constexpr int max_generate_per_tick = 1024;
+    // constexpr float SamplePerFrame = SampleRate / FrameRate; 
+    // constexpr int StartupSampleCount = static_cast<int>(2*SamplePerFrame);
+
+    auto &apu = Bus::get().get_APU();
+    int queued_bytes = SDL_GetAudioStreamQueued(audio_stream);
+    if (queued_bytes < 0) {
+        return;
+    }
+    // auto size = apu->audio_buffer_size();
+    int queued_samples = queued_bytes / sizeof(float);
+    if (queued_samples > high_samples) return;
+    if (queued_samples < low_samples) {   
+        int samples_needed = target_samples - queued_samples;
+        samples_needed = std::min({samples_needed, max_generate_per_tick, apu->audio_buffer_size()});
+        // if (apu->audio_buffer_size() < samples_needed) return;
+        if (apu->consume_audio_sample(audio_buffer.data(), samples_needed)) {
+            SDL_PutAudioStreamData(audio_stream, audio_buffer.data(), samples_needed * sizeof(float));
         }
     }
 } 
+
+void EmulatorWindow::start_audio_thread() {
+    audio_thread_running.store(true);
+    audio_thread = std::thread(&EmulatorWindow::audio_thread_loop, this);
+}
+
+void EmulatorWindow::stop_audio_thread() {
+    audio_thread_running.store(false);
+    if (audio_thread.joinable()) {
+        audio_thread.join();
+    }
+}
+
+void EmulatorWindow::audio_thread_loop() {
+    using namespace std::chrono_literals;
+    auto next_tick = std::chrono::steady_clock::now();
+    while (audio_thread_running.load()) {
+        audio_update();
+        next_tick += 2ms;
+        std::this_thread::sleep_until(next_tick);
+        auto now = std::chrono::steady_clock::now();
+        if (now - next_tick > 10ms) {
+            next_tick = now;
+        }
+    }
+}
 
 bool EmulatorWindow::poll_event(SDL_Event *event) {
     bool state = SDL_PollEvent(event);

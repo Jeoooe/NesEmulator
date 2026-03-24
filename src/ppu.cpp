@@ -328,8 +328,8 @@ void PPU::scan() {
     } sec_oam[8];
     static uint8_t internal_reg[4] = {0, 0, 0, 0};  //内部读取瓦片的寄存器
     static uint8_t shift_buffer[16];                //移位缓冲区
-    static int shift_switch = 0;                
-    static int write_switch = 0;
+    static uint8_t shift_switch = 0;                
+    static uint8_t write_switch = 0;
     static int sprite_count = 0;    //精灵评估的数量
     static int sprite_entry = 0;    //正在评估第几个精灵
     static bool has_sprite0 = 0;
@@ -357,8 +357,9 @@ void PPU::scan() {
                 is_vblank = false;
                 reg2002 &= ~(D7 | D6 | D5); 
                 render_pos = 0;
+                shift_switch = write_switch = 0;
             } 
-            if (!is_rendering()) goto scan_behavior_end;
+            if (!render_enabled()) goto scan_behavior_end;
 
             if (280 <= cycle && cycle <= 304) {
                 regv &= ~0b111101111100000;
@@ -376,7 +377,7 @@ void PPU::scan() {
 
         //没开启渲染的话就只需要考虑vblank 和-1清标志位 ?
         scan_begin:
-        if (!is_rendering()) {
+        if (!render_enabled()) {
             goto scan_behavior_end;
         }
 
@@ -423,10 +424,9 @@ void PPU::scan() {
             {
                 //这里要先渲染一个再加载数据
                 if (cycle <= 256) {
-                    for (int i = 0;i < 8;i++) {
+                    for (int i = 0, shift = regx + shift_switch;i < 8;i++, shift = (shift + 1) & 15) {
                         //这里要检测精灵
                         uint16_t pixel = render_buffer[render_pos];
-                        int shift = (regx + shift_switch + i) & 15;
                         //sp0碰撞
                         //是sp0, 两者不透明. 
                         if ((pixel & Sprite0Flag) && (shift_buffer[shift] & 3)) {
@@ -444,7 +444,7 @@ void PPU::scan() {
                         render_buffer[render_pos] &= 0x1F;  //然后直接清掉所有标志, 给渲染用
                         render_pos++;
                     }
-                    shift_switch = (shift_switch + 8) & 15;
+                    shift_switch = ~shift_switch & 8;
                 }
                 //渲染开启使能, 未开启时将像素变为0, 即变为透明
                 const uint8_t render_enable = (reg2001 & D3) >> 3;
@@ -455,9 +455,9 @@ void PPU::scan() {
                     TileRow{ internal_reg[2], internal_reg[3] }, palette_entry
                 );
                 for (int i = 0;i < 8;i++) {
-                    shift_buffer[write_switch + i] = pixels[i] * render_enable;
+                    shift_buffer[write_switch | i] = pixels[i] * render_enable;
                 }
-                write_switch = (write_switch + 8) & 15;
+                write_switch = ~write_switch & 8;
                 
                 //这里进行X增加
                 if ((regv & 0x001F) == 31) {

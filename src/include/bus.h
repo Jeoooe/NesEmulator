@@ -9,6 +9,7 @@ class CPU;
 class PPU;
 class Mapper;
 class Controller;
+class APU;
 
 //这里要使用单例模式
 class Bus {
@@ -17,6 +18,7 @@ class Bus {
     std::shared_ptr<Mapper> mapper;     //映射方式
     std::shared_ptr<PPU> ppu;           //PPU指针
     std::shared_ptr<Controller> controller_device;
+    std::shared_ptr<APU> apu;           
     Bus();
 public:
     ~Bus() = default;
@@ -37,8 +39,10 @@ public:
     inline auto &get_cpu_ram() {
         return cpu_ram;
     }
-
-    inline std::shared_ptr<Controller> &get_controller() {
+    inline auto &get_APU() {
+        return apu;
+    }
+    inline auto &get_controller() {
         return controller_device;
     }
     void cpu_write(uint16_t addr, uint8_t value);

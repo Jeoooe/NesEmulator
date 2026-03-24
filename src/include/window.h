@@ -5,6 +5,8 @@
 #pragma once
 #include <SDL3/SDL.h>
 #include <array>
+#include <atomic>
+#include <thread>
 #include <const.h>
 
 
@@ -19,16 +21,23 @@ public:
         return running;
     }
 private:
+    void start_audio_thread();
+    void stop_audio_thread();
+    void audio_thread_loop();
+
     // std::array<Uint32, width * height> buffer;
     SDL_Window *window = nullptr;
     SDL_Renderer *renderer = nullptr;
     SDL_Surface *surface = nullptr;
     SDL_Texture *gamepad_texture = nullptr;
     SDL_AudioStream *audio_stream = nullptr;    //音频流
+    std::thread audio_thread;
+    std::atomic<bool> audio_thread_running = false;
     bool running = true;
 
-    static constexpr int samples_per_frame = 2048;
-    float audio_buffer[samples_per_frame];
+    static constexpr int samples_per_frame = 4096;
+    std::array<float, samples_per_frame> audio_buffer;
+    // float audio_buffer[samples_per_frame];
 };
 
 class DebugEmulatorWindow {
