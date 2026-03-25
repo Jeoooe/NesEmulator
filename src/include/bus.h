@@ -9,6 +9,7 @@ class CPU;
 class PPU;
 class Mapper;
 class Controller;
+class APU;
 
 //这里要使用单例模式
 class Bus {
@@ -16,6 +17,7 @@ class Bus {
     std::shared_ptr<Cartridge> cart;    //游戏卡带
     std::shared_ptr<Mapper> mapper;     //映射方式
     std::shared_ptr<PPU> ppu;           //PPU指针
+    std::shared_ptr<APU> apu;           //APU指针
     std::shared_ptr<Controller> controller_device;
     Bus();
 public:

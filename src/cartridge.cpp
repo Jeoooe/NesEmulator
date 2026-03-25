@@ -1,4 +1,5 @@
 #include <cartridge.h>
+
 #include <stdint.h>
 #include <fstream>
 #include <iostream>
@@ -6,6 +7,8 @@
 #include <memory>
 #include <vector>
 #include <cassert>
+
+#include <const.h>
 #include <log.h>
 
 using std::shared_ptr;
@@ -26,10 +29,6 @@ struct Nes_header {
     uint8_t reserved[5];
 };
 
-int get_mirroring(Nes_header *header) {
-    return (header->flag6 & 0b11);
-}
-
 
 shared_ptr<Cartridge> load_nes_file(std::ifstream &file) {
     Nes_header header;
@@ -45,22 +44,18 @@ shared_ptr<Cartridge> load_nes_file(std::ifstream &file) {
     shared_ptr cart = make_shared<Cartridge>();
     cart->prg_rom_size = header.PRG_rom * 16384;
     //这里可能不存在chr_rom, 则使用chr_ram
-    if (header.CHR_rom) {
-        cart->chr_rom_size = header.CHR_rom * 8192;
-        cart->use_chr_ram = false;
-    }
-    else {
-        cart->chr_rom_size = 8192;
-        cart->use_chr_ram = true;
-    }
+    cart->use_chr_ram = header.CHR_rom == 0;
+    cart->chr_rom_size = header.CHR_rom ? header.CHR_rom * 8192 : 8192;
     cart->prg_ram_size = header.PRG_ram ? header.PRG_ram * 8192 : 8192;
-    LOG("PRG ROM: %0xlx bytes\n"
-        "CHR ROM: %0xlx bytes\n", cart->prg_rom_size, cart->chr_rom_size);
 
     cart->is_nes2 = (header.flag7 & 0b1100) == 0b1000;
     cart->mapper = ((header.flag6 & 0xF0) >> 4) | (header.flag7 & 0xF0);
-    cart->mirroring = get_mirroring(&header);
     cart->is_nrom128 = cart->prg_rom_size == 16384;
+    cart->has_prg_ram = header.flag6 & 0b10;
+
+    //镜像类型
+    cart->nt_arrangement = (header.flag6 & 0b1) ? NtArrangement::Horizontal : NtArrangement::Vertical;
+    LOG("Mirroring: %d\n", cart->nt_arrangement);
 
     assert(cart->prg_rom_size);
     assert(cart->chr_rom_size);

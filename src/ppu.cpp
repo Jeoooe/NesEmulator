@@ -63,13 +63,18 @@ inline uint16_t ppu_ram_map(uint16_t addr) {
     const auto &cart = Bus::get().get_cart();
     const uint16_t table = (addr >> 10) & 0x3;
     const uint16_t offset = addr & 0x03FF;
-    const int mirroring = cart->mirroring;
+    const auto mirroring = cart->nt_arrangement;
 
     switch (mirroring) {
-    case 1: // vertical: [A, B, A, B]
+    case NtArrangement::Horizontal: // vertical mirroring: [A, B, A, B]
         return ((table & 0x1) << 10) | offset;
-    case 2: // four-screen: [A, B, C, D]
+    case NtArrangement::OneScreenLower: // single screen: [A, A, A, A]
+        return offset;
+    case NtArrangement::OneScreenUpper:
+        return 0x400 | offset;
+    case NtArrangement::FourScreen: // four-screen: [A, B, C, D]
         return addr & 0x0FFF;
+    case NtArrangement::Vertical: // horizontal mirroring: [A, A, B, B]
     default: // horizontal: [A, A, B, B]
         return (((table >> 1) & 0x1) << 10) | offset;
     }

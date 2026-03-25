@@ -93,6 +93,10 @@ void CPU::run1operation() {
         return;
     } 
     if ((is_IRQ && !GET_FLAG(I)) || pc == 0xFFFE) {  //这里应该有个IRQ屏蔽位?
+        if (irq_delay > 0) {
+            irq_delay--;
+            return;
+        }
         //如果有NMI中断来, 或者程序主动触发BRK
         uint16_t low = Bus::get().cpu_read(0xFFFE);
         uint16_t high = (uint16_t)Bus::get().cpu_read(0xFFFF) << 8;
@@ -695,6 +699,7 @@ void CLD() {
 
 void CLI() {
     cpu.op_length = 1;
+    cpu.irq_delay = 1;
     SET_FLAG(I, 0);
 }
 

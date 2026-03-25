@@ -28,6 +28,7 @@ public:
     bool is_branch = false;                 //当前是否进入分支
     bool is_NMI = false;                    //是否产生了NMI中断
     bool is_IRQ = false;                    //是否产生了IRQ/BRK中断
+    int irq_delay = 0;                      //IRQ/BRK中断的延迟, 需要在下一个周期触发
 };
 
 CPU& get_cpu();
